@@ -22,16 +22,7 @@ class InventreeDataUpdateCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(minutes=5),
         )
         self.api_client = api_client
-        self.categories = {
-            "Electronics/Connectors and Wires": "Connectors and Wires",
-            "Electronics/LEDs and Displays": "LEDs and Displays",
-            "Electronics/Microcontrollers": "Microcontrollers",
-            "Electronics/Motors and Drivers": "Motors and Drivers",
-            "Electronics/Passive Components": "Passive Components",
-            "Electronics/Power Supply": "Power Supply",
-            "Electronics/Sensors and Modules": "Sensors and Modules",
-            "Electronics/Storage Devices": "Storage Devices"
-        }
+        self.categories = {}
         self.locations = {}
 
     async def _async_update_data(self):
@@ -42,6 +33,7 @@ class InventreeDataUpdateCoordinator(DataUpdateCoordinator):
             # Get category tree
             try:
                 data["categories"] = await self.api_client.get_category_tree()
+                _LOGGER.debug("Raw categories data: %s", data["categories"])
             except Exception as e:
                 _LOGGER.error("Error fetching categories: %s", e)
                 data["categories"] = []
@@ -53,17 +45,13 @@ class InventreeDataUpdateCoordinator(DataUpdateCoordinator):
                 _LOGGER.error("Error fetching locations: %s", e)
                 data["locations"] = []
 
-            # Get parts for each category
+            # Get all items
             try:
-                all_parts = []
-                for category_path in self.categories.keys():
-                    category_parts = await self.api_client.get_category_parts(category_path)
-                    all_parts.extend(category_parts)
-                data["parts"] = all_parts
-                _LOGGER.debug(f"Fetched {len(all_parts)} total parts across all categories")
+                data["items"] = await self.api_client.get_items()
+                _LOGGER.debug("Raw items data: %s", data["items"])
             except Exception as e:
-                _LOGGER.error("Error fetching category parts: %s", e)
-                data["parts"] = []
+                _LOGGER.error("Error fetching items: %s", e)
+                data["items"] = []
 
             # Get low stock items
             try:
@@ -81,4 +69,4 @@ class InventreeDataUpdateCoordinator(DataUpdateCoordinator):
     async def async_shutdown(self) -> None:
         """Close API client session when coordinator is shutdown."""
         if self.api_client:
-            await self.api_client.close() 
+            await self.api_client.close()
