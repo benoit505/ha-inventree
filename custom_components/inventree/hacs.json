@@ -1,0 +1,7 @@
+{
+    "name": "InvenTree Integration",
+    "hacs": "1.6.0",
+    "render_readme": true,
+    "homeassistant": "2024.1.0",
+    "domains": ["sensor"]
+}
