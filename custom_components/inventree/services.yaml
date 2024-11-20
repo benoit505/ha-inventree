@@ -1,0 +1,75 @@
+# Service definitions for InvenTree integration
+add_item:
+  name: Add Item
+  description: Add a new item to InvenTree inventory
+  fields:
+    name:
+      name: Name
+      description: Name of the item to add
+      required: true
+      example: "Resistor 10k"
+      selector:
+        text:
+    category:
+      name: Category
+      description: Category for the new item
+      required: true
+      example: "Electronics"
+      selector:
+        text:
+    quantity:
+      name: Quantity
+      description: Initial quantity of the item
+      required: true
+      example: 10
+      selector:
+        number:
+          min: 0
+          step: 1
+          mode: box
+
+edit_item:
+  name: Edit Item
+  description: Edit an existing item in InvenTree
+  fields:
+    item_id:
+      name: Item ID
+      description: ID of the item to edit
+      required: true
+      example: "123"
+      selector:
+        text:
+
+remove_item:
+  name: Remove Item
+  description: Remove an item from InvenTree
+  fields:
+    item_id:
+      name: Item ID
+      description: ID of the item to remove
+      required: true
+      example: "123"
+      selector:
+        text:
+
+adjust_stock:
+  name: Adjust Stock
+  description: Adjust the stock level of an InvenTree item
+  fields:
+    name:
+      name: Item Name
+      description: Name of the item to adjust
+      required: true
+      example: "Resistor 10k"
+      selector:
+        text:
+    quantity:
+      name: Quantity
+      description: Amount to adjust (positive to add, negative to remove)
+      required: true
+      example: 1
+      selector:
+        number:
+          mode: box
+          min: -9999
+          max: 9999
