@@ -1,28 +1,28 @@
 # Home Assistant InvenTree Integration
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 
 A Home Assistant integration for InvenTree inventory management system.
-Features
+## Features
 
 Fetches stock levels from InvenTree categories
 Creates sensors for inventory tracking
 Allows stock adjustments directly from Home Assistant
 Integrates with custom Lovelace cards for visualization
 
-Installation
-HACS (Recommended)
+## Installation
+### HACS (Recommended)
 
-Make sure you have HACS installed
-Add this repository as a custom repository in HACS:
-
-Click on HACS in your Home Assistant instance
-Click on the three dots in the top right corner
-Click on Custom repositories
-Add https://github.com/benoit505/ha-inventree as an Integration
+1. Make sure you have [HACS](https://hacs.xyz) installed
+2. Add this repository as a custom repository in HACS:
+  - Click on HACS in your Home Assistant instance
+  - Click on the three dots in the top right corner
+  - Click on Custom repositories
+  - Add https://github.com/benoit505/ha-inventree as an Integration
 
 
 Search for "InvenTree" in HACS and install
 
-Manual Installation
+### Manual Installation
 
 Copy the custom_components/inventree directory to your Home Assistant's custom_components directory
 Restart Home Assistant
@@ -35,10 +35,10 @@ Click the + button
 Search for "InvenTree"
 Follow the configuration steps
 
-Usage
+## Usage
 After configuration, the integration will create sensors for each InvenTree category.
 Example automation:
-yamlCopyautomation:
+```yaml
   - alias: "Low Stock Alert"
     trigger:
       platform: numeric_state
@@ -48,5 +48,6 @@ yamlCopyautomation:
       - service: notify.notify
         data:
           message: "Stock is running low!"
-Contributing
+```
+## Contributing
 Feel free to contribute! Just open a PR.
