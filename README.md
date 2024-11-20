@@ -1,4 +1,4 @@
-Home Assistant InvenTree Integration
+# Home Assistant InvenTree Integration
 
 A Home Assistant integration for InvenTree inventory management system.
 Features
