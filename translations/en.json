@@ -1,0 +1,38 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Inventree Connection",
+                "description": "Set up your Inventree connection",
+                "data": {
+                    "api_url": "API URL",
+                    "api_key": "API Key"
+                }
+            }
+        },
+        "error": {
+            "cannot_connect": "Failed to connect",
+            "invalid_auth": "Invalid authentication",
+            "unknown": "Unexpected error"
+        },
+        "abort": {
+            "already_configured": "Device is already configured"
+        }
+    },
+    "entity": {
+        "sensor": {
+            "total_stock": {
+                "name": "Total Stock"
+            },
+            "total_parts": {
+                "name": "Total Parts"
+            },
+            "low_stock_items": {
+                "name": "Low Stock Items"
+            },
+            "categories": {
+                "name": "Categories"
+            }
+        }
+    }
+}

@@ -1,0 +1,16 @@
+{
+  "domain": "inventree",
+  "name": "Inventree",
+  "config_flow": true,
+  "documentation": "https://www.home-assistant.com",
+  "requirements": [
+    "inventree",
+    "aiohttp>=3.8.0"
+  ],
+  "dependencies": [],
+  "codeowners": ["@benoit505"],
+  "iot_class": "cloud_polling",
+  "version": "0.1.0",
+  "issue_tracker": "https://github.com/benoit505/ha-inventree/issues",
+  "loggers": ["custom_components.inventree"]
+}
