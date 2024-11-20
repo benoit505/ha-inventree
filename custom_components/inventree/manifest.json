@@ -1,16 +1,17 @@
 {
   "domain": "inventree",
-  "name": "Inventree",
+  "name": "InvenTree",
+  "codeowners": ["@benoit505"],
   "config_flow": true,
-  "documentation": "https://www.home-assistant.com",
+  "dependencies": [],
+  "documentation": "https://github.com/benoit505/ha-inventree",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/benoit505/ha-inventree/issues",
+  "loggers": ["custom_components.inventree"],
   "requirements": [
     "inventree",
     "aiohttp>=3.8.0"
   ],
-  "dependencies": [],
-  "codeowners": ["@benoit505"],
-  "iot_class": "cloud_polling",
-  "version": "0.1.0",
-  "issue_tracker": "https://github.com/benoit505/ha-inventree/issues",
-  "loggers": ["custom_components.inventree"]
+  "version": "0.1.0"
 }
