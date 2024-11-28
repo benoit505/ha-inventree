@@ -1,4 +1,6 @@
 """The Inventree integration."""
+from __future__ import annotations
+
 import logging
 from typing import Any
 
@@ -6,6 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.typing import ConfigType
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 
@@ -16,8 +19,8 @@ from .api import InventreeAPIClient
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
-# This tells Home Assistant that this integration is configured only through config entries
-CONFIG_SCHEMA = cv.config_entry_only_schema({})
+# Updated schema definition
+CONFIG_SCHEMA = vol.Schema({DOMAIN: vol.Schema({})}, extra=vol.ALLOW_EXTRA)
 
 async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     """Set up the Inventree integration from YAML."""

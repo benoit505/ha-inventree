@@ -19,7 +19,7 @@ class InventreeDataUpdateCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name="Inventree",
-            update_interval=timedelta(minutes=5),
+            update_interval=timedelta(seconds=15),
         )
         self.api_client = api_client
         self.categories = {}
@@ -59,6 +59,22 @@ class InventreeDataUpdateCoordinator(DataUpdateCoordinator):
             except Exception as e:
                 _LOGGER.error("Error fetching low stock items: %s", e)
                 data["low_stock"] = []
+
+            # Get parameters for parts that have them
+            try:
+                parameters = {}
+                if data["items"]:
+                    for item in data["items"]:
+                        part_id = item.get('pk')
+                        if part_id:
+                            params = await self.api_client.get_part_parameters(part_id)
+                            if params:  # Only store if parameters exist
+                                parameters[part_id] = params
+                data["parameters"] = parameters
+                _LOGGER.debug("Raw parameters data: %s", parameters)
+            except Exception as e:
+                _LOGGER.error("Error fetching parameters: %s", e)
+                data["parameters"] = {}
 
             return data
 

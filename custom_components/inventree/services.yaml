@@ -73,3 +73,29 @@ adjust_stock:
           mode: box
           min: -9999
           max: 9999
+
+update_parameter:
+  name: Update Parameter
+  description: Update a parameter value for a part
+  fields:
+    part_id:
+      name: Part ID
+      description: ID of the part to update
+      required: true
+      example: "56"
+      selector:
+        text:
+    parameter_name:
+      name: Parameter Name
+      description: Name of the parameter to update
+      required: true
+      example: "Food_State"
+      selector:
+        text:
+    value:
+      name: Value
+      description: New value for the parameter
+      required: true
+      example: "Prepared"
+      selector:
+        text:
