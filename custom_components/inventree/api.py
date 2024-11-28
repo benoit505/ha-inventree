@@ -347,3 +347,39 @@ class InventreeAPIClient:
         except Exception as err:
             _LOGGER.error(f"Error removing stock: {str(err)}")
             raise
+
+    async def get_part_parameters(self, part_id: int):
+        """Get parameters for a specific part."""
+        url = f"{self.api_url}/part/parameter/"
+        params = {"part": part_id}
+        
+        try:
+            async with self.session.get(
+                url,
+                params=params,
+                headers={
+                    "Authorization": f"Token {self.api_key}",
+                    "Accept": "application/json"
+                }
+            ) as response:
+                response.raise_for_status()
+                return await response.json()
+        except Exception as e:
+            _LOGGER.error("Error fetching part parameters: %s", e)
+            return []
+
+    async def _api_request(self, endpoint: str, method: str = "GET", data: dict = None) -> Any:
+        """Make an API request to InvenTree."""
+        url = f"{self.api_url}/api/{endpoint}"
+        headers = {
+            "Authorization": f"Token {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        
+        try:
+            async with self.session.request(method, url, headers=headers, json=data) as response:
+                response.raise_for_status()
+                return await response.json()
+        except Exception as e:
+            _LOGGER.error("API request failed: %s", e)
+            raise

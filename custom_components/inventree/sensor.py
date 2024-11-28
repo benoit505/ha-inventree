@@ -72,13 +72,22 @@ class InventreeCategoryStockSensor(InventreeBaseSensor):
             return {}
 
         items = []
+        parameters = self.coordinator.data.get("parameters", {})
+        
         for item in self.coordinator.data["items"]:
             if isinstance(item, dict) and item.get('category') == self._category_id:
-                items.append({
+                item_data = {
                     'name': item.get('name', ''),
                     'in_stock': item.get('in_stock', 0),
                     'minimum_stock': item.get('minimum_stock', 0)
-                })
+                }
+                
+                # Add parameters if they exist
+                part_id = item.get('pk')
+                if part_id and part_id in parameters:
+                    item_data['parameters'] = parameters[part_id]
+                
+                items.append(item_data)
         
         return {
             'items': items,
