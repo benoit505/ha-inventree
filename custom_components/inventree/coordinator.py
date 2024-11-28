@@ -19,7 +19,7 @@ class InventreeDataUpdateCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name="Inventree",
-            update_interval=timedelta(seconds=15),
+            update_interval=timedelta(seconds=30),
         )
         self.api_client = api_client
         self.categories = {}
@@ -28,6 +28,7 @@ class InventreeDataUpdateCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Fetch data from API."""
         try:
+            _LOGGER.debug("Starting data update")
             data = {}
             
             # Get category tree

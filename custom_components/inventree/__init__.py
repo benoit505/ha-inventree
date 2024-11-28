@@ -91,39 +91,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.debug("Adjusting stock for %s by %s", name, quantity)
             
             try:
-                # Get the current state
-                sensor = hass.states.get("sensor.inventree_microcontrollers_stock")
-                if not sensor:
-                    raise ValueError("Sensor not found")
-                    
-                items = sensor.attributes.get("items", [])
-                _LOGGER.debug("Found items in sensor: %s", items)
+                # Search for the item directly via API
+                search_url = f"part/?search={name}"
+                search_results = await api_client._api_request(search_url)
                 
-                for item in items:
-                    _LOGGER.debug("Checking item: %s", item)
-                    if item["name"] == name:
-                        _LOGGER.debug("Found matching item: %s", item)
-                        item_id = item.get("item_id")
-                        if not item_id:
-                            raise ValueError(f"No item_id found for {name}")
-                            
-                        _LOGGER.debug("Using item_id: %s", item_id)
-                        
-                        if quantity > 0:
-                            _LOGGER.debug("Adding %s to stock for item %s", quantity, item_id)
-                            await api_client.add_stock(item_id=item_id, quantity=quantity)
-                        else:
-                            _LOGGER.debug("Removing %s from stock for item %s", abs(quantity), item_id)
-                            await api_client.remove_stock(item_id=item_id, quantity=abs(quantity))
-                            
-                        await coordinator.async_request_refresh()
-                        return
-                        
-                raise ValueError(f"Item {name} not found")
+                if not search_results:
+                    raise ValueError(f"Item '{name}' not found")
+                    
+                # Use the first matching result
+                item = search_results[0]
+                part_id = item.get('pk')
+                
+                if not part_id:
+                    raise ValueError(f"Invalid item data received for '{name}'")
+                    
+                _LOGGER.debug("Found item: %s (ID: %s)", item.get('name'), part_id)
+                
+                if quantity > 0:
+                    await api_client.add_stock(item_id=part_id, quantity=quantity)
+                else:
+                    await api_client.remove_stock(item_id=part_id, quantity=abs(quantity))
+                    
+                await coordinator.async_request_refresh()
                     
             except Exception as err:
                 _LOGGER.error("Failed to adjust stock: %s", err)
-                _LOGGER.exception("Full error:")  # This will log the full stack trace
+                raise
         
         # Register services
         hass.services.async_register(DOMAIN, 'add_item', add_item)
