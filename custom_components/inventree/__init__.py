@@ -118,11 +118,138 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.error("Failed to adjust stock: %s", err)
                 raise
         
+        async def variant_operations(call: ServiceCall) -> None:
+            """Handle variant operations."""
+            name = call.data.get('name')
+            operation = call.data.get('operation')
+            
+            try:
+                # Find base template part
+                base_results = await api_client._api_request(f"part/?name={name}")
+                base_part = next(
+                    (p for p in base_results if p.get('name') == name and p.get('is_template')),
+                    None
+                )
+                
+                if not base_part:
+                    raise ValueError(f"Template part '{name}' not found")
+                    
+                base_id = base_part['pk']
+                _LOGGER.debug("Found template part: %s (ID: %s)", name, base_id)
+                
+                # Get variants
+                variants = await api_client._api_request(f"part/?variant_of={base_id}")
+                
+                if operation == "transfer_stock":
+                    source_name = call.data.get('source_variant')
+                    target_name = call.data.get('target_variant')
+                    quantity = float(call.data.get('quantity', 0))
+                    
+                    # Find source and target variants
+                    source_variant = next((v for v in variants if v['name'] == source_name), None)
+                    target_variant = next((v for v in variants if v['name'] == target_name), None)
+                    
+                    if not source_variant or not target_variant:
+                        raise ValueError(f"Could not find variants: {source_name} -> {target_name}")
+                        
+                    # Handle special case for Raw->Prepared conversion
+                    if "Raw" in source_name and "Cooked" in target_name:
+                        # Get cooked ratio parameter
+                        params = await api_client._api_request(f"part/parameter/?part={base_id}")
+                        cooked_ratio = next(
+                            (float(p['data']) for p in params if p['template_detail']['name'] == 'Cooked_Ratio'),
+                            1.0
+                        )
+                        target_quantity = quantity * cooked_ratio
+                    else:
+                        target_quantity = quantity
+                    
+                    # Perform the transfer
+                    await api_client.remove_stock(source_variant['pk'], quantity)
+                    await api_client.add_stock(target_variant['pk'], target_quantity)
+                    
+                    _LOGGER.debug(
+                        "Transferred stock: %s -> %s (quantity: %s -> %s)",
+                        source_name, target_name, quantity, target_quantity
+                    )
+                    
+                elif operation == "update_parameter":
+                    parameter_name = call.data.get('parameter_name')
+                    parameter_value = call.data.get('parameter_value')
+                    
+                    # Update parameter on base template
+                    await api_client.update_parameter(base_id, parameter_name, parameter_value)
+                    
+                    _LOGGER.debug(
+                        "Updated parameter %s=%s on template %s",
+                        parameter_name, parameter_value, name
+                    )
+                    
+                elif operation == "manage_batch":
+                    # Future implementation
+                    _LOGGER.info("Batch management not yet implemented")
+                    
+                else:
+                    raise ValueError(f"Unknown operation: {operation}")
+                    
+                await coordinator.async_refresh()
+                
+            except Exception as err:
+                _LOGGER.error("Failed to perform variant operation: %s", err)
+                raise
+        
+        async def update_metadata(call) -> None:
+            """Handle metadata updates."""
+            category_id = call.data.get('category_id')
+            part_id = call.data.get('part_id')
+            include_images = call.data.get('include_images', True)
+            force_update = call.data.get('force_update', False)
+            
+            _LOGGER.debug("Updating metadata: category=%s, part=%s, images=%s, force=%s",
+                         category_id, part_id, include_images, force_update)
+            
+            try:
+                if part_id:
+                    # Update single part
+                    data = await api_client.get_part_details(
+                        part_id=int(part_id),
+                        include_images=include_images
+                    )
+                    _LOGGER.debug("Updated metadata for part %s", part_id)
+                elif category_id:
+                    # Update all parts in category
+                    parts = await api_client.get_category_parts(category_id)
+                    for part in parts:
+                        if include_images or force_update:
+                            data = await api_client.get_part_details(
+                                part_id=part['id'],
+                                include_images=include_images
+                            )
+                    _LOGGER.debug("Updated metadata for category %s", category_id)
+                else:
+                    # Update all parts
+                    parts = await api_client.get_items()
+                    for part in parts:
+                        if include_images or force_update:
+                            data = await api_client.get_part_details(
+                                part_id=part['pk'],
+                                include_images=include_images
+                            )
+                    _LOGGER.debug("Updated metadata for all parts")
+
+                await coordinator.async_request_refresh()
+                
+            except Exception as err:
+                _LOGGER.error("Failed to update metadata: %s", err)
+                raise
+        
         # Register services
         hass.services.async_register(DOMAIN, 'add_item', add_item)
         hass.services.async_register(DOMAIN, 'edit_item', edit_item)
         hass.services.async_register(DOMAIN, 'remove_item', remove_item)
         hass.services.async_register(DOMAIN, 'adjust_stock', adjust_stock)
+        hass.services.async_register(DOMAIN, 'variant_operations', variant_operations)
+        hass.services.async_register(DOMAIN, 'update_metadata', update_metadata)
         _LOGGER.debug("Services registered successfully")
         
         return True

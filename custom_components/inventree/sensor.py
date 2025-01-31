@@ -73,6 +73,7 @@ class InventreeCategoryStockSensor(InventreeBaseSensor):
 
         items = []
         parameters = self.coordinator.data.get("parameters", {})
+        metadata = self.coordinator.data.get("metadata", {})
         
         for item in self.coordinator.data["items"]:
             if isinstance(item, dict) and item.get('category') == self._category_id:
@@ -84,8 +85,12 @@ class InventreeCategoryStockSensor(InventreeBaseSensor):
                 
                 # Add parameters if they exist
                 part_id = item.get('pk')
-                if part_id and part_id in parameters:
-                    item_data['parameters'] = parameters[part_id]
+                if part_id:
+                    if part_id in parameters:
+                        item_data['parameters'] = parameters[part_id]
+                    if part_id in metadata:
+                        item_data['image'] = metadata[part_id].get('image')
+                        item_data['thumbnail'] = metadata[part_id].get('thumbnail')
                 
                 items.append(item_data)
         
