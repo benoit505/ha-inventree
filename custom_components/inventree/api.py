@@ -72,10 +72,13 @@ class InventreeAPIClient:
             _LOGGER.error(f"Error fetching category parts: {str(err)}")
             raise
 
-    async def get_items(self, filters: dict = None):
-        """Get all items, optionally filtered."""
+    async def get_items(self) -> list[dict]:
+        """Get all items from Inventree."""
         url = self._get_api_url("part/")
-        params = filters if filters else {}
+        params = {
+            "active": "true",
+            "include_parameters": "true"  # Get parameters too
+        }
         
         try:
             async with self.session.get(
@@ -87,26 +90,37 @@ class InventreeAPIClient:
                 }
             ) as response:
                 response.raise_for_status()
-                data = await response.json()
+                if not response.headers.get('content-type', '').startswith('application/json'):
+                    _LOGGER.error(
+                        "Unexpected content type: %s from URL: %s", 
+                        response.headers.get('content-type'), 
+                        response.url
+                    )
+                    return []
                 
-                # Process items to include necessary fields
-                processed_items = []
-                for item in data:
-                    processed_items.append({
-                        'pk': item['pk'],
-                        'name': item['name'],
-                        'category': item.get('category'),
-                        'category_name': item.get('category_name', ''),
-                        'in_stock': float(item.get('in_stock', 0)),
-                        'minimum_stock': float(item.get('minimum_stock', 0)),
-                        'description': item.get('description', ''),
-                    })
+                items = await response.json()
                 
-                _LOGGER.debug("Retrieved %d items", len(processed_items))
-                return processed_items
-        except Exception as e:
-            _LOGGER.error("Error fetching items: %s", e)
-            return []
+                # Fetch images if available
+                for item in items:
+                    if item.get('thumbnail'):
+                        try:
+                            img_url = f"{self.api_url}{item['thumbnail']}"
+                            async with self.session.get(img_url) as img_response:
+                                if img_response.status == 200:
+                                    img_data = await img_response.read()
+                                    img_base64 = base64.b64encode(img_data).decode('utf-8')
+                                    mime_type = img_response.headers.get('Content-Type', 'image/jpeg')
+                                    item['thumbnail'] = f"data:{mime_type};base64,{img_base64}"
+                        except Exception as img_err:
+                            _LOGGER.error(f"Error fetching image for {item.get('name')}: {img_err}")
+                            item['thumbnail'] = None
+                            item['image'] = None
+
+                return items
+
+        except Exception as err:
+            _LOGGER.error("Error fetching items: %s", err)
+            raise
 
     async def add_item(self, name, category, quantity):
         """Add a new item."""
@@ -642,4 +656,23 @@ class InventreeAPIClient:
                 return data
         except Exception as err:
             _LOGGER.error(f"Error fetching part details: {err}")
+            raise
+
+    async def print_label(self, item_id: int, template_id: int, plugin: str = "zebra") -> dict:
+        """Print a label."""
+        url = self._get_api_url("label/print/")
+        try:
+            async with self.session.post(
+                url,
+                json={
+                    "items": [item_id],
+                    "plugin": plugin,
+                    "template": template_id
+                },
+                headers={"Authorization": f"Token {self.api_key}"}
+            ) as response:
+                response.raise_for_status()
+                return await response.json()
+        except Exception as err:
+            _LOGGER.error(f"Error printing label: {err}")
             raise

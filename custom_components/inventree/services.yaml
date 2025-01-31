@@ -193,3 +193,32 @@ update_metadata:
       default: false
       selector:
         boolean:
+
+print_label:
+  name: Print Label
+  description: Print a label for an InvenTree item
+  fields:
+    item_id:
+      name: Item ID
+      description: ID of the item to print label for
+      required: true
+      example: "22"
+      selector:
+        text:
+    template_id:
+      name: Template ID
+      description: ID of the label template to use
+      required: true
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+    plugin:
+      name: Printer Plugin
+      description: Name of the printer plugin to use
+      required: true
+      default: "zebra"
+      selector:
+        text:

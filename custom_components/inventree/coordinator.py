@@ -31,35 +31,28 @@ class InventreeDataUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.debug("Starting data update")
             data = {}
             
-            # Get category tree
-            try:
-                data["categories"] = await self.api_client.get_category_tree()
-                _LOGGER.debug("Raw categories data: %s", data["categories"])
-            except Exception as e:
-                _LOGGER.error("Error fetching categories: %s", e)
-                data["categories"] = []
-
-            # Get stock locations
-            try:
-                data["locations"] = await self.api_client.get_stock_locations()
-            except Exception as e:
-                _LOGGER.error("Error fetching locations: %s", e)
-                data["locations"] = []
-
-            # Get all items
+            # Get all items with rich data
             try:
                 data["items"] = await self.api_client.get_items()
-                _LOGGER.debug("Raw items data: %s", data["items"])
+                _LOGGER.debug("Fetched %d items with rich data", len(data["items"]))
+                
+                # Verify we have pk for each item
+                for item in data["items"]:
+                    if not item.get('pk'):
+                        _LOGGER.warning("Item missing pk: %s", item.get('name', 'Unknown'))
+                    if not item.get('thumbnail'):
+                        _LOGGER.debug("Item missing thumbnail: %s", item.get('name', 'Unknown'))
             except Exception as e:
                 _LOGGER.error("Error fetching items: %s", e)
                 data["items"] = []
 
-            # Get low stock items
+            # Get category tree for organization
             try:
-                data["low_stock"] = await self.api_client.get_low_stock_items()
+                data["categories"] = await self.api_client.get_category_tree()
+                _LOGGER.debug("Fetched category tree")
             except Exception as e:
-                _LOGGER.error("Error fetching low stock items: %s", e)
-                data["low_stock"] = []
+                _LOGGER.error("Error fetching categories: %s", e)
+                data["categories"] = []
 
             # Get parameters for parts that have them
             try:
@@ -72,35 +65,16 @@ class InventreeDataUpdateCoordinator(DataUpdateCoordinator):
                             if params:  # Only store if parameters exist
                                 parameters[part_id] = params
                 data["parameters"] = parameters
-                _LOGGER.debug("Raw parameters data: %s", parameters)
             except Exception as e:
                 _LOGGER.error("Error fetching parameters: %s", e)
                 data["parameters"] = {}
 
-            # Store metadata including images
-            try:
-                metadata = {}
-                if data["items"]:
-                    for item in data["items"]:
-                        part_id = item.get('pk')
-                        if part_id:
-                            details = await self.api_client.get_part_details(part_id)
-                            if details:
-                                _LOGGER.debug(
-                                    "Got metadata for part %s: image=%s, thumbnail=%s",
-                                    part_id,
-                                    details.get('image'),
-                                    details.get('thumbnail')
-                                )
-                                metadata[part_id] = {
-                                    'image': details.get('image'),
-                                    'thumbnail': details.get('thumbnail')
-                                }
-                data["metadata"] = metadata
-                _LOGGER.debug("Final metadata: %s", metadata)
-            except Exception as e:
-                _LOGGER.error("Error fetching metadata: %s", e)
-                data["metadata"] = {}
+
+            # We don't need separate metadata anymore since it's included in items
+            # But we'll keep the key for backward compatibility
+            data["metadata"] = {}
+
+            _LOGGER.debug("Data update complete with %d items", len(data["items"]))
 
             return data
 
