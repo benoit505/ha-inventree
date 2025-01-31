@@ -69,11 +69,13 @@ class InventreeDataUpdateCoordinator(DataUpdateCoordinator):
                 _LOGGER.error("Error fetching parameters: %s", e)
                 data["parameters"] = {}
 
+
             # We don't need separate metadata anymore since it's included in items
             # But we'll keep the key for backward compatibility
             data["metadata"] = {}
 
             _LOGGER.debug("Data update complete with %d items", len(data["items"]))
+
             return data
 
         except Exception as err:

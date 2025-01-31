@@ -105,6 +105,7 @@ class InventreeCategoryStockSensor(InventreeBaseSensor):
                     'ordering': item.get('ordering')
                 }
                 
+
                 items.append(item_data)
         
         return {

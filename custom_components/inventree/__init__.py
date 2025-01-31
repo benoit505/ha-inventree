@@ -243,6 +243,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.error("Failed to update metadata: %s", err)
                 raise
         
+            except Exception as err:
+                _LOGGER.error("Failed to update metadata: %s", err)
+                raise
+        
         async def print_label(call) -> None:
             """Handle printing a label."""
             item_id = call.data.get('item_id')
