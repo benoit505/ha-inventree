@@ -5,6 +5,8 @@ from typing import Any, Optional
 from .models import InventreePart
 from asyncio import sleep
 from aiohttp import ClientError
+import base64
+import io
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -348,35 +350,45 @@ class InventreeAPIClient:
             _LOGGER.error("Error fetching low stock items: %s", err)
             return []  # Return empty list instead of raising
 
-    async def add_stock(self, item_id: int, quantity: int, location_id: int = None):
-        """Add a quantity of stock to an item."""
-        url = self._get_api_url("stock/")
-        
+    async def add_stock(self, item_id: int, quantity: float, location_id: int = None) -> None:
+        """Add stock for an item."""
         try:
-            stock_data = {
+            # Use Kitchen Cabinet location if none specified
+            if not location_id:
+                # Get the Kitchen Cabinet location (assuming it's the only non-structural one)
+                locations = await self._api_request("stock/location/")
+                valid_location = next(
+                    (loc for loc in locations if not loc.get('structural', True) and 'Kitchen' in loc.get('pathstring', '')),
+                    None
+                )
+                
+                if valid_location:
+                    location_id = valid_location['pk']
+                else:
+                    raise ValueError("Kitchen Cabinet location not found. Please create a non-structural location first.")
+            
+            data = {
                 "part": item_id,
                 "quantity": quantity,
-                "status": 10,
-                "delete_on_deplete": True
+                "location": location_id,
+                "status": 10
             }
-            if location_id:
-                stock_data["location"] = location_id
-            
-            _LOGGER.debug("Creating stock item with data: %s", stock_data)
+                
+            _LOGGER.debug("Creating stock item with data: %s", data)
             
             async with self.session.post(
-                url,
-                json=stock_data,
+                self._get_api_url("stock/"),
+                json=data,
                 headers={
                     "Authorization": f"Token {self.api_key}",
-                    "Accept": "application/json",
                     "Content-Type": "application/json"
                 }
             ) as response:
+                if response.status == 400:
+                    error_data = await response.json()
+                    _LOGGER.error("Stock creation error details: %s", error_data)
                 response.raise_for_status()
-                result = await response.json()
-                _LOGGER.debug("Stock item created: %s", result)
-                return result
+                return await response.json()
                 
         except Exception as err:
             _LOGGER.error("Error adding stock: %s", err)
@@ -528,4 +540,106 @@ class InventreeAPIClient:
 
         except Exception as err:
             _LOGGER.error("Error consolidating stock: %s", err)
+            raise
+
+    async def update_parameter(self, part_id: int, parameter_name: str, value: str):
+        """Update or create a parameter for a part."""
+        try:
+            # First, get existing parameters for the part
+            existing_params = await self.get_part_parameters(part_id)
+            
+            # Find the matching parameter if it exists
+            param_to_update = next(
+                (p for p in existing_params 
+                 if p['template_detail']['name'] == parameter_name),
+                None
+            )
+
+            if param_to_update:
+                # Update existing parameter
+                update_url = self._get_api_url(f"part/parameter/{param_to_update['pk']}/")
+                async with self.session.patch(
+                    update_url,
+                    json={"data": value},
+                    headers={
+                        "Authorization": f"Token {self.api_key}",
+                        "Content-Type": "application/json",
+                        "Accept": "application/json"
+                    }
+                ) as response:
+                    response.raise_for_status()
+                    _LOGGER.debug(
+                        "Updated parameter '%s' for part %s to '%s'",
+                        parameter_name, part_id, value
+                    )
+                    return await response.json()
+            else:
+                # Need to create new parameter - first get template
+                template_url = self._get_api_url("part/parameter/template/")
+                async with self.session.get(
+                    template_url,
+                    params={"name": parameter_name},
+                    headers={"Authorization": f"Token {self.api_key}"}
+                ) as template_response:
+                    template_response.raise_for_status()
+                    templates = await template_response.json()
+                    
+                    if not templates:
+                        raise ValueError(f"Parameter template '{parameter_name}' not found")
+                    
+                    template = templates[0]
+
+                # Create new parameter
+                create_url = self._get_api_url("part/parameter/")
+                async with self.session.post(
+                    create_url,
+                    json={
+                        "part": part_id,
+                        "template": template['pk'],
+                        "data": value
+                    },
+                    headers={
+                        "Authorization": f"Token {self.api_key}",
+                        "Content-Type": "application/json",
+                        "Accept": "application/json"
+                    }
+                ) as create_response:
+                    create_response.raise_for_status()
+                    _LOGGER.debug(
+                        "Created parameter '%s' for part %s with value '%s'",
+                        parameter_name, part_id, value
+                    )
+                    return await create_response.json()
+
+        except Exception as err:
+            _LOGGER.error("Error updating parameter: %s", err)
+            raise
+
+    async def get_part_details(self, part_id: int, include_images: bool = True) -> dict:
+        """Get detailed information for a specific part."""
+        url = self._get_api_url(f"part/{part_id}/")
+        try:
+            async with self.session.get(
+                url,
+                headers={"Authorization": f"Token {self.api_key}"}
+            ) as response:
+                response.raise_for_status()
+                data = await response.json()
+                
+                if include_images and data.get('thumbnail'):
+                    # Convert image to base64
+                    img_url = f"{self.api_url}{data['thumbnail']}"
+                    try:
+                        async with self.session.get(img_url) as img_response:
+                            if img_response.status == 200:
+                                img_data = await img_response.read()
+                                img_base64 = base64.b64encode(img_data).decode('utf-8')
+                                mime_type = img_response.headers.get('Content-Type', 'image/jpeg')
+                                data['thumbnail'] = f"data:{mime_type};base64,{img_base64}"
+                    except Exception as img_err:
+                        _LOGGER.error(f"Error fetching image: {img_err}")
+                
+                return data
+        except Exception as err:
+            _LOGGER.error(f"Error fetching part details: {err}")
             raise

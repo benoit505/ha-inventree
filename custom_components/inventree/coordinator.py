@@ -77,6 +77,31 @@ class InventreeDataUpdateCoordinator(DataUpdateCoordinator):
                 _LOGGER.error("Error fetching parameters: %s", e)
                 data["parameters"] = {}
 
+            # Store metadata including images
+            try:
+                metadata = {}
+                if data["items"]:
+                    for item in data["items"]:
+                        part_id = item.get('pk')
+                        if part_id:
+                            details = await self.api_client.get_part_details(part_id)
+                            if details:
+                                _LOGGER.debug(
+                                    "Got metadata for part %s: image=%s, thumbnail=%s",
+                                    part_id,
+                                    details.get('image'),
+                                    details.get('thumbnail')
+                                )
+                                metadata[part_id] = {
+                                    'image': details.get('image'),
+                                    'thumbnail': details.get('thumbnail')
+                                }
+                data["metadata"] = metadata
+                _LOGGER.debug("Final metadata: %s", metadata)
+            except Exception as e:
+                _LOGGER.error("Error fetching metadata: %s", e)
+                data["metadata"] = {}
+
             return data
 
         except Exception as err:
