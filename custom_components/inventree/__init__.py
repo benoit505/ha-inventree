@@ -243,6 +243,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.error("Failed to update metadata: %s", err)
                 raise
         
+        async def print_label(call) -> None:
+            """Handle printing a label."""
+            item_id = call.data.get('item_id')
+            template_id = call.data.get('template_id', 2)
+            plugin = call.data.get('plugin', 'zebra')
+            
+            _LOGGER.debug("Printing label for item %s using template %s and plugin %s", 
+                         item_id, template_id, plugin)
+            try:
+                await api_client.print_label(
+                    item_id=int(item_id),
+                    template_id=int(template_id),
+                    plugin=plugin
+                )
+            except Exception as err:
+                _LOGGER.error("Failed to print label: %s", err)
+                raise
+        
         # Register services
         hass.services.async_register(DOMAIN, 'add_item', add_item)
         hass.services.async_register(DOMAIN, 'edit_item', edit_item)
@@ -250,6 +268,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_register(DOMAIN, 'adjust_stock', adjust_stock)
         hass.services.async_register(DOMAIN, 'variant_operations', variant_operations)
         hass.services.async_register(DOMAIN, 'update_metadata', update_metadata)
+        hass.services.async_register(DOMAIN, 'print_label', print_label)
         _LOGGER.debug("Services registered successfully")
         
         return True
