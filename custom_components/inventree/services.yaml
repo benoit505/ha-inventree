@@ -1,4 +1,65 @@
 # Service definitions for InvenTree integration
+variant_operations:
+  name: "InvenTree Integration: Parameters, Variants and Batch codes"
+  description: Manage variants, parameters, and stock transfers between variants
+  fields:
+    name:
+      name: Template Name
+      description: Name of the template part (e.g., Rice)
+      required: true
+      example: "Rice"
+      selector:
+        text:
+    operation:
+      name: Operation
+      description: Type of operation to perform
+      required: true
+      selector:
+        select:
+          options:
+            - "transfer_stock"  # Transfer stock between variants
+            - "update_parameter"  # Update parameter on template or variant
+            - "manage_batch"  # Future: Manage batch codes
+    source_variant:
+      name: Source Variant
+      description: Name of the source variant (for stock transfer)
+      required: false
+      example: "Raw Rice"
+      selector:
+        text:
+    target_variant:
+      name: Target Variant
+      description: Name of the target variant (for stock transfer)
+      required: false
+      example: "Cooked Rice"
+      selector:
+        text:
+    quantity:
+      name: Quantity
+      description: Amount to transfer (in variant's units)
+      required: false
+      example: 0.150
+      selector:
+        number:
+          min: 0.001
+          max: 100.0
+          step: 0.001
+          mode: box
+    parameter_name:
+      name: Parameter Name
+      description: Name of the parameter to update
+      required: false
+      example: "Cooked_Ratio"
+      selector:
+        text:
+    parameter_value:
+      name: Parameter Value
+      description: New value for the parameter
+      required: false
+      example: "2.5"
+      selector:
+        text:
+
 add_item:
   name: Add Item
   description: Add a new item to InvenTree inventory
@@ -99,3 +160,36 @@ update_parameter:
       example: "Prepared"
       selector:
         text:
+
+update_metadata:
+  name: Update Metadata
+  description: Update metadata (including images) for InvenTree parts
+  fields:
+    category_id:
+      name: Category ID
+      description: Optional - Update only parts in this category
+      required: false
+      example: "11"
+      selector:
+        text:
+    part_id:
+      name: Part ID
+      description: Optional - Update only this specific part
+      required: false
+      example: "3"
+      selector:
+        text:
+    include_images:
+      name: Include Images
+      description: Whether to fetch and update image URLs
+      required: false
+      default: true
+      selector:
+        boolean:
+    force_update:
+      name: Force Update
+      description: Update all metadata even if already present
+      required: false
+      default: false
+      selector:
+        boolean:

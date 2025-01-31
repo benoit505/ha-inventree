@@ -1,6 +1,6 @@
 {
   "domain": "inventree",
-  "name": "InvenTree",
+  "name": "InvenTree Integration",
   "codeowners": ["@benoit505"],
   "config_flow": true,
   "dependencies": [],

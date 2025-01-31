@@ -1,7 +1,8 @@
 {
     "name": "InvenTree Integration",
-    "hacs": "1.6.0",
+    "content_in_root": false,
     "render_readme": true,
     "homeassistant": "2024.1.0",
-    "domains": ["sensor"]
+    "domains": ["sensor", "button"],
+    "iot_class": "local_polling"
 }

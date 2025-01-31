@@ -17,6 +17,8 @@ class InventreePart:
     units: str = ""
     category_name: Optional[str] = None
     default_location: Optional[int] = None
+    image_url: Optional[str] = None
+    thumbnail_url: Optional[str] = None
 
 @dataclass
 class CategoryMapping:
