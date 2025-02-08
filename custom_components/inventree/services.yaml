@@ -163,7 +163,7 @@ update_parameter:
 
 update_metadata:
   name: Update Metadata
-  description: Update metadata (including images) for InvenTree parts
+  description: Update metadata and download thumbnails for InvenTree parts
   fields:
     category_id:
       name: Category ID
@@ -179,9 +179,9 @@ update_metadata:
       example: "3"
       selector:
         text:
-    include_images:
-      name: Include Images
-      description: Whether to fetch and update image URLs
+    download_thumbnails:
+      name: Download Thumbnails
+      description: Whether to download and store thumbnails locally
       required: false
       default: true
       selector:

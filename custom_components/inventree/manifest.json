@@ -1,17 +1,12 @@
 {
   "domain": "inventree",
-  "name": "InvenTree Integration",
-  "codeowners": ["@benoit505"],
-  "config_flow": true,
-  "dependencies": [],
+  "name": "InvenTree",
   "documentation": "https://github.com/benoit505/ha-inventree",
-  "integration_type": "hub",
-  "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/benoit505/ha-inventree/issues",
-  "loggers": ["custom_components.inventree"],
+  "dependencies": [],
+  "codeowners": ["@benoit505"],
   "requirements": [
-    "inventree",
-    "aiohttp>=3.8.0"
+    "aiofiles"
   ],
-  "version": "1.1.0"
+  "version": "0.1.0",
+  "iot_class": "local_polling"
 }

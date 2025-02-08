@@ -7,6 +7,11 @@ from asyncio import sleep
 from aiohttp import ClientError
 import base64
 import io
+import os
+from pathlib import Path
+import aiofiles
+import pwd
+import grp
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -77,18 +82,14 @@ class InventreeAPIClient:
         url = self._get_api_url("part/")
         params = {
             "active": "true",
-            "include_parameters": "true"  # Get parameters too
+            "include_parameters": "true"
         }
         
         try:
-            async with self.session.get(
-                url,
-                params=params,
-                headers={
-                    "Authorization": f"Token {self.api_key}",
-                    "Accept": "application/json"
-                }
-            ) as response:
+            async with self.session.get(url, params=params, headers={
+                "Authorization": f"Token {self.api_key}",
+                "Accept": "application/json"
+            }) as response:
                 response.raise_for_status()
                 if not response.headers.get('content-type', '').startswith('application/json'):
                     _LOGGER.error(
@@ -100,26 +101,43 @@ class InventreeAPIClient:
                 
                 items = await response.json()
                 
-                # Fetch images if available
+                # Use the same thumbnail path as save_thumbnail()
+                thumb_dir = Path(self.get_thumbnail_path())
+                _LOGGER.debug(f"Using thumbnail directory: {thumb_dir}")
+                thumb_dir.mkdir(parents=True, exist_ok=True, mode=0o777)
+                
                 for item in items:
                     if item.get('thumbnail'):
                         try:
                             img_url = f"{self.api_url}{item['thumbnail']}"
+                            part_id = item['pk']
+                            ext = os.path.splitext(item['thumbnail'])[1] or '.jpg'
+                            filename = f"part_{part_id}{ext}"
+                            filepath = thumb_dir / filename
+                            
+                            _LOGGER.debug(f"Processing thumbnail for part {part_id}")
+                            
                             async with self.session.get(img_url) as img_response:
                                 if img_response.status == 200:
                                     img_data = await img_response.read()
-                                    img_base64 = base64.b64encode(img_data).decode('utf-8')
-                                    mime_type = img_response.headers.get('Content-Type', 'image/jpeg')
-                                    item['thumbnail'] = f"data:{mime_type};base64,{img_base64}"
+                                    async with aiofiles.open(filepath, 'wb') as f:
+                                        await f.write(img_data)
+                                    _LOGGER.debug(f"Saved thumbnail for part {part_id}")
+                                    
+                                    item['thumbnail'] = f"/local/inventree_thumbs/{filename}"
+                                else:
+                                    _LOGGER.error(f"Failed to download image: {img_response.status}")
+                                    
                         except Exception as img_err:
-                            _LOGGER.error(f"Error fetching image for {item.get('name')}: {img_err}")
+                            _LOGGER.error(f"Error processing thumbnail for part {part_id}: {img_err}")
                             item['thumbnail'] = None
                             item['image'] = None
 
                 return items
 
         except Exception as err:
-            _LOGGER.error("Error fetching items: %s", err)
+            _LOGGER.error(f"Error fetching items: {str(err)}")
+            _LOGGER.exception(err)
             raise
 
     async def add_item(self, name, category, quantity):
@@ -629,7 +647,7 @@ class InventreeAPIClient:
             _LOGGER.error("Error updating parameter: %s", err)
             raise
 
-    async def get_part_details(self, part_id: int, include_images: bool = True) -> dict:
+    async def get_part_details(self, part_id: int, download_thumbnails: bool = True) -> dict:
         """Get detailed information for a specific part."""
         url = self._get_api_url(f"part/{part_id}/")
         try:
@@ -640,18 +658,26 @@ class InventreeAPIClient:
                 response.raise_for_status()
                 data = await response.json()
                 
-                if include_images and data.get('thumbnail'):
-                    # Convert image to base64
+                if download_thumbnails and data.get('thumbnail'):
+                    thumb_dir = Path(self.get_thumbnail_path())
+                    thumb_dir.mkdir(parents=True, exist_ok=True)
+                    
                     img_url = f"{self.api_url}{data['thumbnail']}"
                     try:
                         async with self.session.get(img_url) as img_response:
                             if img_response.status == 200:
+                                ext = os.path.splitext(data['thumbnail'])[1] or '.jpg'
+                                filename = f"part_{part_id}{ext}"
+                                filepath = thumb_dir / filename
+                                
                                 img_data = await img_response.read()
-                                img_base64 = base64.b64encode(img_data).decode('utf-8')
-                                mime_type = img_response.headers.get('Content-Type', 'image/jpeg')
-                                data['thumbnail'] = f"data:{mime_type};base64,{img_base64}"
+                                async with aiofiles.open(filepath, 'wb') as f:
+                                    await f.write(img_data)
+                                
+                                data['thumbnail'] = f"/local/inventree_thumbs/{filename}"
+                                _LOGGER.debug(f"Saved thumbnail for part {part_id}")
                     except Exception as img_err:
-                        _LOGGER.error(f"Error fetching image: {img_err}")
+                        _LOGGER.error(f"Error saving thumbnail for part {part_id}: {img_err}")
                 
                 return data
         except Exception as err:
@@ -676,3 +702,69 @@ class InventreeAPIClient:
         except Exception as err:
             _LOGGER.error(f"Error printing label: {err}")
             raise
+
+    def get_thumbnail_path(self) -> str:
+        """Get the thumbnail directory path."""
+        return "/config/www/inventree_thumbs"
+
+    async def save_thumbnail(self, filename: str, data: bytes) -> bool:
+        """Save thumbnail to file with verbose logging."""
+        import os
+        import pwd
+        import grp
+        from pathlib import Path
+        
+        # Get current process info
+        current_uid = os.getuid()
+        current_gid = os.getgid()
+        _LOGGER.debug(f"💡 Process running as UID: {current_uid}, GID: {current_gid}")
+        
+        thumbnail_dir = self.get_thumbnail_path()
+        filepath = os.path.join(thumbnail_dir, filename)
+        
+        _LOGGER.debug("📁 Saving thumbnail:")
+        _LOGGER.debug(f"  - Directory: {thumbnail_dir}")
+        _LOGGER.debug(f"  - Full path: {filepath}")
+        _LOGGER.debug(f"  - Data size: {len(data)} bytes")
+        
+        # Check/create directory with 777 permissions
+        if os.path.exists(thumbnail_dir):
+            stat = os.stat(thumbnail_dir)
+            _LOGGER.debug("📂 Directory exists:")
+            _LOGGER.debug(f"  - Permissions: {oct(stat.st_mode)}")
+            _LOGGER.debug(f"  - Owner: {stat.st_uid}")
+            _LOGGER.debug(f"  - Group: {stat.st_gid}")
+        else:
+            _LOGGER.debug(f"📂 Creating directory {thumbnail_dir}")
+            try:
+                Path(thumbnail_dir).mkdir(parents=True, exist_ok=True, mode=0o777)
+                os.chmod(thumbnail_dir, 0o777)  # Ensure 777 permissions
+                _LOGGER.debug("  ✅ Directory created with 777 permissions")
+            except Exception as e:
+                _LOGGER.error(f"  ❌ Failed to create directory: {e}")
+                return False
+        
+        # Save file with 777 permissions
+        try:
+            _LOGGER.debug(f"💾 Writing file: {filepath}")
+            with open(filepath, "wb") as f:
+                f.write(data)
+            os.chmod(filepath, 0o777)  # Set 777 permissions on the file
+            
+            # Verify file
+            if os.path.exists(filepath):
+                stat = os.stat(filepath)
+                _LOGGER.debug("✅ File saved successfully:")
+                _LOGGER.debug(f"  - Size: {stat.st_size} bytes")
+                _LOGGER.debug(f"  - Permissions: {oct(stat.st_mode)}")
+                _LOGGER.debug(f"  - Owner: {stat.st_uid}")
+                _LOGGER.debug(f"  - Group: {stat.st_gid}")
+                return True
+            else:
+                _LOGGER.error("❌ File doesn't exist after writing!")
+                return False
+            
+        except Exception as err:
+            _LOGGER.error(f"❌ Error saving thumbnail: {err}")
+            _LOGGER.exception("Full traceback:")
+            return False
