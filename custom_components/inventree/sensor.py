@@ -78,34 +78,20 @@ class InventreeCategoryStockSensor(InventreeBaseSensor):
         for item in self.coordinator.data["items"]:
             if isinstance(item, dict) and item.get('category') == self._category_id:
                 item_data = {
-                    'pk': item.get('pk'),
                     'name': item.get('name', ''),
                     'in_stock': item.get('in_stock', 0),
-                    'minimum_stock': item.get('minimum_stock', 0),
-                    'image': item.get('image'),
-                    'thumbnail': item.get('thumbnail'),
-                    'active': item.get('active'),
-                    'assembly': item.get('assembly'),
-                    'category': item.get('category'),
-                    'category_name': item.get('category_name'),
-                    'component': item.get('component'),
-                    'description': item.get('description'),
-                    'full_name': item.get('full_name'),
-                    'IPN': item.get('IPN'),
-                    'keywords': item.get('keywords'),
-                    'purchaseable': item.get('purchaseable'),
-                    'revision': item.get('revision'),
-                    'salable': item.get('salable'),
-                    'units': item.get('units'),
-                    'total_in_stock': item.get('total_in_stock'),
-                    'unallocated_stock': item.get('unallocated_stock'),
-                    'allocated_to_build_orders': item.get('allocated_to_build_orders'),
-                    'allocated_to_sales_orders': item.get('allocated_to_sales_orders'),
-                    'building': item.get('building'),
-                    'ordering': item.get('ordering')
+                    'minimum_stock': item.get('minimum_stock', 0)
                 }
                 
-
+                # Add parameters if they exist
+                part_id = item.get('pk')
+                if part_id:
+                    if part_id in parameters:
+                        item_data['parameters'] = parameters[part_id]
+                    if part_id in metadata:
+                        item_data['image'] = metadata[part_id].get('image')
+                        item_data['thumbnail'] = metadata[part_id].get('thumbnail')
+                
                 items.append(item_data)
         
         return {

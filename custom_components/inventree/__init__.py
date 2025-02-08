@@ -202,38 +202,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             """Handle metadata updates."""
             category_id = call.data.get('category_id')
             part_id = call.data.get('part_id')
-            include_images = call.data.get('include_images', True)
+            download_thumbnails = call.data.get('download_thumbnails', True)
             force_update = call.data.get('force_update', False)
             
-            _LOGGER.debug("Updating metadata: category=%s, part=%s, images=%s, force=%s",
-                         category_id, part_id, include_images, force_update)
+            _LOGGER.debug("Updating metadata: category=%s, part=%s, thumbnails=%s, force=%s",
+                         category_id, part_id, download_thumbnails, force_update)
             
             try:
                 if part_id:
                     # Update single part
                     data = await api_client.get_part_details(
                         part_id=int(part_id),
-                        include_images=include_images
+                        download_thumbnails=download_thumbnails
                     )
                     _LOGGER.debug("Updated metadata for part %s", part_id)
                 elif category_id:
                     # Update all parts in category
                     parts = await api_client.get_category_parts(category_id)
                     for part in parts:
-                        if include_images or force_update:
+                        if download_thumbnails or force_update:
                             data = await api_client.get_part_details(
                                 part_id=part['id'],
-                                include_images=include_images
+                                download_thumbnails=download_thumbnails
                             )
                     _LOGGER.debug("Updated metadata for category %s", category_id)
                 else:
                     # Update all parts
                     parts = await api_client.get_items()
                     for part in parts:
-                        if include_images or force_update:
+                        if download_thumbnails or force_update:
                             data = await api_client.get_part_details(
                                 part_id=part['pk'],
-                                include_images=include_images
+                                download_thumbnails=download_thumbnails
                             )
                     _LOGGER.debug("Updated metadata for all parts")
 
@@ -241,28 +241,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 
             except Exception as err:
                 _LOGGER.error("Failed to update metadata: %s", err)
-                raise
-        
-            except Exception as err:
-                _LOGGER.error("Failed to update metadata: %s", err)
-                raise
-        
-        async def print_label(call) -> None:
-            """Handle printing a label."""
-            item_id = call.data.get('item_id')
-            template_id = call.data.get('template_id', 2)
-            plugin = call.data.get('plugin', 'zebra')
-            
-            _LOGGER.debug("Printing label for item %s using template %s and plugin %s", 
-                         item_id, template_id, plugin)
-            try:
-                await api_client.print_label(
-                    item_id=int(item_id),
-                    template_id=int(template_id),
-                    plugin=plugin
-                )
-            except Exception as err:
-                _LOGGER.error("Failed to print label: %s", err)
                 raise
         
         # Register services
