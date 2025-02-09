@@ -36,7 +36,7 @@ class InventreeBaseSensor(CoordinatorEntity[InventreeDataUpdateCoordinator], Sen
         self._attr_device_class = SensorDeviceClass.ENUM
 
 class InventreeCategoryStockSensor(InventreeBaseSensor):
-    """Sensor for stock in a category."""
+    """Sensor for stock in a specific category."""
 
     def __init__(
         self, 
@@ -52,6 +52,7 @@ class InventreeCategoryStockSensor(InventreeBaseSensor):
         )
         self._category_id = category_id
         self._category_name = category_name
+        _LOGGER.debug("Created category sensor for %s (id: %s)", category_name, category_id)
 
     @property
     def native_value(self) -> int:
@@ -68,13 +69,12 @@ class InventreeCategoryStockSensor(InventreeBaseSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
+        _LOGGER.debug("Sensor extra_state_attributes called for category %s", self._category_id)
+        
         if not self.coordinator.data or "items" not in self.coordinator.data:
             return {}
 
         items = []
-        parameters = self.coordinator.data.get("parameters", {})
-        metadata = self.coordinator.data.get("metadata", {})
-        
         for item in self.coordinator.data["items"]:
             if isinstance(item, dict) and item.get('category') == self._category_id:
                 item_data = {
@@ -102,11 +102,13 @@ class InventreeCategoryStockSensor(InventreeBaseSensor):
                     'allocated_to_build_orders': item.get('allocated_to_build_orders'),
                     'allocated_to_sales_orders': item.get('allocated_to_sales_orders'),
                     'building': item.get('building'),
-                    'ordering': item.get('ordering')
+                    'ordering': item.get('ordering'),
+                    'variant_of': item.get('variant_of'),
+                    'is_template': item.get('is_template', False)
                 }
-                
                 items.append(item_data)
         
+        _LOGGER.debug("Returning %d items for category %s", len(items), self._category_id)
         return {
             'items': items,
             'category_name': self._category_name,
@@ -164,12 +166,16 @@ async def async_setup_entry(
     """Set up Inventree sensor based on a config entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
     
+    _LOGGER.debug("Setting up Inventree sensors")
     entities = []
     
     if coordinator.data and "categories" in coordinator.data:
+        _LOGGER.debug("Found %d categories", len(coordinator.data["categories"]))
         for category in coordinator.data["categories"]:
             if isinstance(category, dict):
                 try:
+                    _LOGGER.debug("Creating sensor for category %s (id: %s)", 
+                                category.get('name'), category.get('pk'))
                     sensor = InventreeCategoryStockSensor(
                         coordinator,
                         category['pk'],
@@ -183,6 +189,9 @@ async def async_setup_entry(
                         e
                     )
     
+    # Add low stock sensor
+    _LOGGER.debug("Adding low stock sensor")
     entities.append(InventreeLowStockSensor(coordinator))
     
-    async_add_entities(entities, True)
+    _LOGGER.debug("Adding %d entities", len(entities))
+    async_add_entities(entities, True)  # Note the True parameter here

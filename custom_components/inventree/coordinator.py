@@ -36,12 +36,23 @@ class InventreeDataUpdateCoordinator(DataUpdateCoordinator):
                 data["items"] = await self.api_client.get_items()
                 _LOGGER.debug("Fetched %d items with rich data", len(data["items"]))
                 
-                # Verify we have pk for each item
+                # Process thumbnails for each item
                 for item in data["items"]:
                     if not item.get('pk'):
                         _LOGGER.warning("Item missing pk: %s", item.get('name', 'Unknown'))
-                    if not item.get('thumbnail'):
-                        _LOGGER.debug("Item missing thumbnail: %s", item.get('name', 'Unknown'))
+                        continue
+                        
+                    try:
+                        # Get detailed info including downloaded thumbnail
+                        details = await self.api_client.get_part_details(item['pk'])
+                        if details.get('thumbnail'):
+                            item['thumbnail'] = details['thumbnail']
+                            _LOGGER.debug("Updated thumbnail for item %s: %s", 
+                                        item.get('name'), item['thumbnail'])
+                    except Exception as thumb_err:
+                        _LOGGER.error("Error processing thumbnail for item %s: %s", 
+                                    item.get('name'), thumb_err)
+                        
             except Exception as e:
                 _LOGGER.error("Error fetching items: %s", e)
                 data["items"] = []
@@ -54,23 +65,8 @@ class InventreeDataUpdateCoordinator(DataUpdateCoordinator):
                 _LOGGER.error("Error fetching categories: %s", e)
                 data["categories"] = []
 
-            # Get parameters for parts that have them
-            try:
-                parameters = {}
-                if data["items"]:
-                    for item in data["items"]:
-                        part_id = item.get('pk')
-                        if part_id:
-                            params = await self.api_client.get_part_parameters(part_id)
-                            if params:  # Only store if parameters exist
-                                parameters[part_id] = params
-                data["parameters"] = parameters
-            except Exception as e:
-                _LOGGER.error("Error fetching parameters: %s", e)
-                data["parameters"] = {}
-
-            # We don't need separate metadata anymore since it's included in items
-            # But we'll keep the key for backward compatibility
+            # Parameters are now included in items response
+            data["parameters"] = {}
             data["metadata"] = {}
 
             _LOGGER.debug("Data update complete with %d items", len(data["items"]))

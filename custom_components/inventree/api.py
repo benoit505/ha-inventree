@@ -7,6 +7,11 @@ from asyncio import sleep
 from aiohttp import ClientError
 import base64
 import io
+import os
+from pathlib import Path
+import aiofiles
+import pwd
+import grp
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -77,7 +82,7 @@ class InventreeAPIClient:
         url = self._get_api_url("part/")
         params = {
             "active": "true",
-            "include_parameters": "true"  # Get parameters too
+            "include_parameters": "true"
         }
         
         try:
@@ -98,29 +103,62 @@ class InventreeAPIClient:
                     )
                     return []
                 
-                items = await response.json()
+                data = await response.json()
                 
-                # Fetch images if available
-                for item in items:
-                    if item.get('thumbnail'):
-                        try:
-                            img_url = f"{self.api_url}{item['thumbnail']}"
-                            async with self.session.get(img_url) as img_response:
-                                if img_response.status == 200:
-                                    img_data = await img_response.read()
-                                    img_base64 = base64.b64encode(img_data).decode('utf-8')
-                                    mime_type = img_response.headers.get('Content-Type', 'image/jpeg')
-                                    item['thumbnail'] = f"data:{mime_type};base64,{img_base64}"
-                        except Exception as img_err:
-                            _LOGGER.error(f"Error fetching image for {item.get('name')}: {img_err}")
-                            item['thumbnail'] = None
-                            item['image'] = None
-
-                return items
-
-        except Exception as err:
-            _LOGGER.error("Error fetching items: %s", err)
-            raise
+                # Debug log raw data for specific items
+                for item in data:
+                    if item.get('pk') in [60, 61, 62]:  # Rice template and variants
+                        _LOGGER.debug("API raw data for part %s: variant_of=%s, is_template=%s", 
+                                    item.get('pk'), 
+                                    item.get('variant_of'), 
+                                    item.get('is_template'))
+                
+                processed_items = []
+                for item in data:
+                    processed_item = {
+                        'pk': item['pk'],
+                        'name': item['name'],
+                        'category': item.get('category'),
+                        'category_name': item.get('category_name', ''),
+                        'in_stock': float(item.get('in_stock', 0)),
+                        'minimum_stock': float(item.get('minimum_stock', 0)),
+                        'description': item.get('description', ''),
+                        'image': item.get('image'),
+                        'thumbnail': item.get('thumbnail'),
+                        'active': item.get('active'),
+                        'assembly': item.get('assembly'),
+                        'component': item.get('component'),
+                        'full_name': item.get('full_name'),
+                        'IPN': item.get('IPN'),
+                        'keywords': item.get('keywords'),
+                        'purchaseable': item.get('purchaseable'),
+                        'revision': item.get('revision'),
+                        'salable': item.get('salable'),
+                        'units': item.get('units'),
+                        'total_in_stock': item.get('total_in_stock'),
+                        'unallocated_stock': item.get('unallocated_stock'),
+                        'allocated_to_build_orders': item.get('allocated_to_build_orders'),
+                        'allocated_to_sales_orders': item.get('allocated_to_sales_orders'),
+                        'building': item.get('building'),
+                        'ordering': item.get('ordering'),
+                        'variant_of': item.get('variant_of'),
+                        'is_template': item.get('is_template', False),
+                        'parameters': item.get('parameters', [])  # Include parameters from the API response
+                    }
+                    
+                    # Debug log processed items
+                    if item.get('pk') in [60, 61, 62]:
+                        _LOGGER.debug("API processed data for part %s: variant_of=%s, is_template=%s",
+                                    processed_item.get('pk'),
+                                    processed_item.get('variant_of'),
+                                    processed_item.get('is_template'))
+                    
+                    processed_items.append(processed_item)
+                
+                return processed_items
+        except Exception as e:
+            _LOGGER.error("Error fetching items: %s", e)
+            return []
 
     async def add_item(self, name, category, quantity):
         """Add a new item."""
@@ -629,7 +667,11 @@ class InventreeAPIClient:
             _LOGGER.error("Error updating parameter: %s", err)
             raise
 
-    async def get_part_details(self, part_id: int, include_images: bool = True) -> dict:
+    def get_thumbnail_path(self) -> str:
+        """Get the path for storing thumbnails."""
+        return "/config/www/inventree_thumbs"
+    
+    async def get_part_details(self, part_id: int, download_thumbnails: bool = True) -> dict:
         """Get detailed information for a specific part."""
         url = self._get_api_url(f"part/{part_id}/")
         try:
@@ -640,18 +682,26 @@ class InventreeAPIClient:
                 response.raise_for_status()
                 data = await response.json()
                 
-                if include_images and data.get('thumbnail'):
-                    # Convert image to base64
+                if download_thumbnails and data.get('thumbnail'):
+                    thumb_dir = Path(self.get_thumbnail_path())
+                    thumb_dir.mkdir(parents=True, exist_ok=True)
+                    
                     img_url = f"{self.api_url}{data['thumbnail']}"
                     try:
                         async with self.session.get(img_url) as img_response:
                             if img_response.status == 200:
+                                ext = os.path.splitext(data['thumbnail'])[1] or '.jpg'
+                                filename = f"part_{part_id}{ext}"
+                                filepath = thumb_dir / filename
+                                
                                 img_data = await img_response.read()
-                                img_base64 = base64.b64encode(img_data).decode('utf-8')
-                                mime_type = img_response.headers.get('Content-Type', 'image/jpeg')
-                                data['thumbnail'] = f"data:{mime_type};base64,{img_base64}"
+                                async with aiofiles.open(filepath, 'wb') as f:
+                                    await f.write(img_data)
+                                
+                                data['thumbnail'] = f"/local/inventree_thumbs/{filename}"
+                                _LOGGER.debug(f"Saved thumbnail for part {part_id}")
                     except Exception as img_err:
-                        _LOGGER.error(f"Error fetching image: {img_err}")
+                        _LOGGER.error(f"Error saving thumbnail for part {part_id}: {img_err}")
                 
                 return data
         except Exception as err:
@@ -662,17 +712,27 @@ class InventreeAPIClient:
         """Print a label."""
         url = self._get_api_url("label/print/")
         try:
+            data = {
+                "items": [item_id],
+                "plugin": plugin,
+                "template": template_id
+            }
+            
+            _LOGGER.debug("Printing label - URL: %s, Data: %s", url, data)
+            
             async with self.session.post(
                 url,
-                json={
-                    "items": [item_id],
-                    "plugin": plugin,
-                    "template": template_id
-                },
-                headers={"Authorization": f"Token {self.api_key}"}
+                json=data,
+                headers={
+                    "Authorization": f"Token {self.api_key}",
+                    "Content-Type": "application/json"
+                }
             ) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    _LOGGER.error("Label print failed - Status: %s, Response: %s", response.status, error_text)
                 response.raise_for_status()
                 return await response.json()
         except Exception as err:
-            _LOGGER.error(f"Error printing label: {err}")
+            _LOGGER.error("Error printing label: %s", err)
             raise
