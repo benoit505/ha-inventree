@@ -23,6 +23,9 @@ class InventreeAPIClient:
             self.api_url = self.api_url[:-4]
         self.api_key = api_key
         self.session = None
+        
+        # Just add a Python log if needed
+        _LOGGER.debug(f"InvenTree API client initialized with URL: {self.api_url}")
 
     async def async_init(self):
         """Create aiohttp session."""
@@ -80,20 +83,42 @@ class InventreeAPIClient:
     async def get_items(self) -> list[dict]:
         """Get all items from Inventree."""
         url = self._get_api_url("part/")
-        params = filters if filters else {}
+        params = {
+            "active": "true",
+            "include_parameters": "true"
+        }
         
         try:
-            async with self.session.get(url, params=params, headers={
-                "Authorization": f"Token {self.api_key}",
-                "Accept": "application/json"
-            }) as response:
+            async with self.session.get(
+                url,
+                params=params,
+                headers={
+                    "Authorization": f"Token {self.api_key}",
+                    "Accept": "application/json"
+                }
+            ) as response:
                 response.raise_for_status()
+                if not response.headers.get('content-type', '').startswith('application/json'):
+                    _LOGGER.error(
+                        "Unexpected content type: %s from URL: %s", 
+                        response.headers.get('content-type'), 
+                        response.url
+                    )
+                    return []
+                
                 data = await response.json()
                 
-                # Process items to include necessary fields
+                # Debug log raw data for specific items
+                for item in data:
+                    if item.get('pk') in [60, 61, 62]:  # Rice template and variants
+                        _LOGGER.debug("API raw data for part %s: variant_of=%s, is_template=%s", 
+                                    item.get('pk'), 
+                                    item.get('variant_of'), 
+                                    item.get('is_template'))
+                
                 processed_items = []
                 for item in data:
-                    processed_items.append({
+                    processed_item = {
                         'pk': item['pk'],
                         'name': item['name'],
                         'category': item.get('category'),
@@ -101,9 +126,38 @@ class InventreeAPIClient:
                         'in_stock': float(item.get('in_stock', 0)),
                         'minimum_stock': float(item.get('minimum_stock', 0)),
                         'description': item.get('description', ''),
-                    })
+                        'image': item.get('image'),
+                        'thumbnail': item.get('thumbnail'),
+                        'active': item.get('active'),
+                        'assembly': item.get('assembly'),
+                        'component': item.get('component'),
+                        'full_name': item.get('full_name'),
+                        'IPN': item.get('IPN'),
+                        'keywords': item.get('keywords'),
+                        'purchaseable': item.get('purchaseable'),
+                        'revision': item.get('revision'),
+                        'salable': item.get('salable'),
+                        'units': item.get('units'),
+                        'total_in_stock': item.get('total_in_stock'),
+                        'unallocated_stock': item.get('unallocated_stock'),
+                        'allocated_to_build_orders': item.get('allocated_to_build_orders'),
+                        'allocated_to_sales_orders': item.get('allocated_to_sales_orders'),
+                        'building': item.get('building'),
+                        'ordering': item.get('ordering'),
+                        'variant_of': item.get('variant_of'),
+                        'is_template': item.get('is_template', False),
+                        'parameters': item.get('parameters', [])  # Include parameters from the API response
+                    }
+                    
+                    # Debug log processed items
+                    if item.get('pk') in [60, 61, 62]:
+                        _LOGGER.debug("API processed data for part %s: variant_of=%s, is_template=%s",
+                                    processed_item.get('pk'),
+                                    processed_item.get('variant_of'),
+                                    processed_item.get('is_template'))
+                    
+                    processed_items.append(processed_item)
                 
-                _LOGGER.debug("Retrieved %d items", len(processed_items))
                 return processed_items
         except Exception as e:
             _LOGGER.error("Error fetching items: %s", e)
@@ -616,39 +670,298 @@ class InventreeAPIClient:
             _LOGGER.error("Error updating parameter: %s", err)
             raise
 
+    def get_thumbnail_path(self) -> str:
+        """Get the path for storing thumbnails."""
+        return "/config/www/inventree_thumbs"
+    
     async def get_part_details(self, part_id: int, download_thumbnails: bool = True) -> dict:
-        """Get detailed information for a specific part."""
-        url = self._get_api_url(f"part/{part_id}/")
+        """Get detailed information for a part, including thumbnail."""
         try:
+            # Get part details
+            url = self._get_api_url(f"part/{part_id}/")
             async with self.session.get(
                 url,
                 headers={"Authorization": f"Token {self.api_key}"}
             ) as response:
                 response.raise_for_status()
-                data = await response.json()
+                part = await response.json()
                 
-                if download_thumbnails and data.get('thumbnail'):
-                    thumb_dir = Path(self.get_thumbnail_path())
-                    thumb_dir.mkdir(parents=True, exist_ok=True)
-                    
-                    img_url = f"{self.api_url}{data['thumbnail']}"
+                # Add barcode hash if available
+                try:
+                    barcode_url = self._get_api_url(f"barcode/")
+                    async with self.session.get(
+                        barcode_url,
+                        params={"part": part_id},
+                        headers={"Authorization": f"Token {self.api_key}"}
+                    ) as barcode_response:
+                        if barcode_response.status == 200:
+                            barcode_data = await barcode_response.json()
+                            if barcode_data and len(barcode_data) > 0:
+                                part['barcode_hash'] = barcode_data[0].get('hash', '')
+                except Exception as e:
+                    _LOGGER.error(f"Error getting barcode for part {part_id}: {e}")
+                    part['barcode_hash'] = ''
+                
+                # Download thumbnail if requested
+                if download_thumbnails and part.get('image'):
                     try:
-                        async with self.session.get(img_url) as img_response:
-                            if img_response.status == 200:
-                                ext = os.path.splitext(data['thumbnail'])[1] or '.jpg'
-                                filename = f"part_{part_id}{ext}"
-                                filepath = thumb_dir / filename
+                        # Get the thumbnail path
+                        thumbnail_path = self.get_thumbnail_path()
+                        os.makedirs(thumbnail_path, exist_ok=True)
+                        
+                        # Extract filename from image URL
+                        image_url = part['image']
+                        if not image_url:
+                            return part
+                            
+                        # Determine file extension
+                        file_ext = os.path.splitext(image_url)[1]
+                        if not file_ext:
+                            file_ext = '.png'  # Default to PNG
+                            
+                        # Create local filename
+                        local_filename = f"part_{part_id}{file_ext}"
+                        local_path = os.path.join(thumbnail_path, local_filename)
+                        
+                        # Download the image
+                        image_full_url = f"{self.api_url}{image_url}"
+                        async with self.session.get(
+                            image_full_url,
+                            headers={"Authorization": f"Token {self.api_key}"}
+                        ) as img_response:
+                            img_response.raise_for_status()
+                            img_data = await img_response.read()
+                            
+                            with open(local_path, 'wb') as f:
+                                f.write(img_data)
                                 
-                                img_data = await img_response.read()
-                                async with aiofiles.open(filepath, 'wb') as f:
-                                    await f.write(img_data)
-                                
-                                data['thumbnail'] = f"/local/inventree_thumbs/{filename}"
-                                _LOGGER.debug(f"Saved thumbnail for part {part_id}")
-                    except Exception as img_err:
-                        _LOGGER.error(f"Error saving thumbnail for part {part_id}: {img_err}")
+                            _LOGGER.debug(f"Saved thumbnail for part {part_id}")
+                            
+                            # Add local path to part data
+                            part['thumbnail'] = f"/local/inventree_thumbs/{local_filename}"
+                    except Exception as e:
+                        _LOGGER.error(f"Error downloading thumbnail for part {part_id}: {e}")
                 
-                return data
-        except Exception as err:
-            _LOGGER.error(f"Error fetching part details: {err}")
+                return part
+        except Exception as e:
+            _LOGGER.error(f"Error getting part details {part_id}: {e}")
             raise
+
+    async def print_label(self, item_id: int, template_id: int, plugin: str = "zebra") -> dict:
+        """Print a label."""
+        url = self._get_api_url("label/print/")
+        try:
+            data = {
+                "items": [item_id],
+                "plugin": plugin,
+                "template": template_id
+            }
+            
+            _LOGGER.debug("Printing label - URL: %s, Data: %s", url, data)
+            
+            async with self.session.post(
+                url,
+                json=data,
+                headers={
+                    "Authorization": f"Token {self.api_key}",
+                    "Content-Type": "application/json"
+                }
+            ) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    _LOGGER.error("Label print failed - Status: %s, Response: %s", response.status, error_text)
+                response.raise_for_status()
+                return await response.json()
+        except Exception as err:
+            _LOGGER.error("Error printing label: %s", err)
+            raise
+
+    async def create_part(self, part_data: dict) -> dict:
+        """Create a new part."""
+        url = f"{self.api_url}/api/part/"
+        
+        try:
+            _LOGGER.debug(f"Creating part with data: {part_data}")
+            async with self.session.post(
+                url,
+                json=part_data,
+                headers={
+                    "Authorization": f"Token {self.api_key}",
+                    "Content-Type": "application/json"
+                }
+            ) as response:
+                response_text = await response.text()
+                _LOGGER.debug(f"API Response: {response.status} - {response_text}")
+                
+                if response.status == 400:
+                    _LOGGER.error(f"API Error details: {response_text}")
+                response.raise_for_status()
+                return await response.json()
+        except Exception as e:
+            _LOGGER.error(f"Error creating part: {e}")
+            raise
+
+    async def find_part_by_barcode(self, barcode: str) -> Optional[dict]:
+        """Find a part by its barcode."""
+        # First try direct barcode search
+        url = f"{self.api_url}/api/part/barcode/"
+        params = {
+            "barcode": barcode,
+            "format": "json"
+        }
+        
+        try:
+            _LOGGER.debug("Looking up part with barcode: %s", barcode)
+            async with self.session.get(
+                url,
+                params=params,
+                headers={
+                    "Authorization": f"Token {self.api_key}",
+                    "Accept": "application/json"
+                }
+            ) as response:
+                if response.status == 404:
+                    _LOGGER.debug("No part found with barcode: %s", barcode)
+                    return None
+                
+                response.raise_for_status()
+                if not response.headers.get('content-type', '').startswith('application/json'):
+                    _LOGGER.error(
+                        "Unexpected content type: %s from URL: %s", 
+                        response.headers.get('content-type'), 
+                        response.url
+                    )
+                    return None
+                
+                result = await response.json()
+                
+                if isinstance(result, dict) and result.get('part'):
+                    _LOGGER.debug("Found part with barcode %s: %s", barcode, result['part'].get('name'))
+                    return result['part']
+                
+                _LOGGER.debug("No part found with barcode: %s", barcode)
+                return None
+                
+        except Exception as e:
+            _LOGGER.error("Error looking up part by barcode %s: %s", barcode, e)
+            return None
+
+    async def process_barcode(self, barcode: str) -> dict:
+        """Process a barcode scan."""
+        url = f"{self.api_url}/api/barcode/"
+        try:
+            _LOGGER.debug(f"Processing barcode: '{barcode}' (type: {type(barcode)})")
+            
+            payload = {"barcode": barcode}
+            _LOGGER.debug(f"Sending payload: {payload}")
+            
+            # First try to find the barcode
+            async with self.session.post(
+                url,
+                headers={
+                    "Authorization": f"Token {self.api_key}",
+                    "Content-Type": "application/json"
+                },
+                json=payload
+            ) as response:
+                data = await response.json()
+                _LOGGER.debug(f"Barcode response: {data}")
+                
+                # If barcode not found, we get a 400 with error message
+                if response.status == 400 and "No match found" in data.get('error', ''):
+                    return {
+                        "found": False,
+                        "barcode_hash": data.get('barcode_hash'),
+                        "barcode_data": data.get('barcode_data'),
+                        "error": "Barcode not found"
+                    }
+                
+                response.raise_for_status()
+                
+                if data.get('success') == "Match found for barcode data":
+                    part_pk = data['part']['pk']
+                    # Get full part details
+                    part = await self.get_part_details(part_pk)
+                    return {
+                        "found": True,
+                        "part": part,
+                        "dashboard_url": f"/dashboard-{part.get('category_name', '').lower()}"
+                    }
+                
+                return {
+                    "found": False,
+                    "error": data.get('error', 'Unknown error')
+                }
+                
+        except Exception as e:
+            _LOGGER.error(f"Error processing barcode: {e}")
+            _LOGGER.exception(e)
+            raise
+
+    async def link_barcode(self, barcode: str, part_id: int) -> dict:
+        """Link a barcode to a part."""
+        url = f"{self.api_url}/api/barcode/link/"
+        
+        try:
+            _LOGGER.debug(f"Linking barcode {barcode} to part {part_id}")
+            async with self.session.post(
+                url,
+                json={
+                    "barcode": barcode,
+                    "part": part_id
+                },
+                headers={
+                    "Authorization": f"Token {self.api_key}",
+                    "Content-Type": "application/json"
+                }
+            ) as response:
+                response_text = await response.text()
+                _LOGGER.debug(f"API Response: {response.status} - {response_text}")
+                
+                response.raise_for_status()
+                return await response.json()
+        except Exception as e:
+            _LOGGER.error(f"Error linking barcode: {e}")
+            raise
+
+    async def update_metadata(self, part_id: int, download_thumbnails: bool = True, parameter_name: str = None):
+        """Update metadata for a specific part, optionally filtering by parameter name."""
+        try:
+            # Get part details
+            details = await self.get_part_details(part_id, download_thumbnails)
+            
+            # If parameter_name is specified, only update that parameter
+            if parameter_name:
+                _LOGGER.debug("Updating specific parameter: %s for part %s", parameter_name, part_id)
+                # Get the specific parameter
+                params_url = self._get_api_url(f"part/parameter/")
+                async with self.session.get(
+                    params_url,
+                    params={"part": part_id},
+                    headers={"Authorization": f"Token {self.api_key}"}
+                ) as response:
+                    response.raise_for_status()
+                    all_params = await response.json()
+                    
+                    # Filter to the specific parameter
+                    param = next((p for p in all_params if p['template_detail']['name'] == parameter_name), None)
+                    if param:
+                        _LOGGER.debug("Found parameter %s with value %s", parameter_name, param['data'])
+                    else:
+                        _LOGGER.debug("Parameter %s not found for part %s", parameter_name, part_id)
+            
+            return details
+        except Exception as err:
+            _LOGGER.error("Error updating metadata: %s", err)
+            raise
+
+    async def test_connection(self):
+        """Test the connection to Inventree."""
+        try:
+            await self.get_items()
+            return True
+        except Exception as e:
+            _LOGGER.error(f"Connection test failed: {e}")
+            raise
+
+

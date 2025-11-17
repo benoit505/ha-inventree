@@ -36,7 +36,7 @@ class InventreeBaseSensor(CoordinatorEntity[InventreeDataUpdateCoordinator], Sen
         self._attr_device_class = SensorDeviceClass.ENUM
 
 class InventreeCategoryStockSensor(InventreeBaseSensor):
-    """Sensor for stock in a category."""
+    """Sensor for stock in a specific category."""
 
     def __init__(
         self, 
@@ -52,6 +52,7 @@ class InventreeCategoryStockSensor(InventreeBaseSensor):
         )
         self._category_id = category_id
         self._category_name = category_name
+        _LOGGER.debug("Created category sensor for %s (id: %s)", category_name, category_id)
 
     @property
     def native_value(self) -> int:
@@ -68,32 +69,58 @@ class InventreeCategoryStockSensor(InventreeBaseSensor):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return additional attributes."""
+        _LOGGER.debug("Sensor extra_state_attributes called for category %s", self._category_id)
+        
         if not self.coordinator.data or "items" not in self.coordinator.data:
             return {}
 
         items = []
-        parameters = self.coordinator.data.get("parameters", {})
-        metadata = self.coordinator.data.get("metadata", {})
+        parameters = self.coordinator.data.get("parameters", {})  # Get parameters dict from coordinator
         
         for item in self.coordinator.data["items"]:
             if isinstance(item, dict) and item.get('category') == self._category_id:
                 item_data = {
+                    'pk': item.get('pk'),
                     'name': item.get('name', ''),
                     'in_stock': item.get('in_stock', 0),
-                    'minimum_stock': item.get('minimum_stock', 0)
+                    'minimum_stock': item.get('minimum_stock', 0),
+                    'image': item.get('image'),
+                    'thumbnail': item.get('thumbnail'),
+                    'active': item.get('active'),
+                    'assembly': item.get('assembly'),
+                    'category': item.get('category'),
+                    'category_name': item.get('category_name'),
+                    'category_pathstring': item.get('category_pathstring', ''),
+                    'dashboard_url': item.get('dashboard_url', ''),
+                    'inventree_url': item.get('inventree_url', ''),
+                    'barcode_hash': item.get('barcode_hash', ''),
+                    'barcode_data': item.get('barcode_data', ''),
+                    'component': item.get('component'),
+                    'description': item.get('description'),
+                    'full_name': item.get('full_name'),
+                    'IPN': item.get('IPN'),
+                    'keywords': item.get('keywords'),
+                    'purchaseable': item.get('purchaseable'),
+                    'revision': item.get('revision'),
+                    'salable': item.get('salable'),
+                    'units': item.get('units'),
+                    'total_in_stock': item.get('total_in_stock'),
+                    'unallocated_stock': item.get('unallocated_stock'),
+                    'allocated_to_build_orders': item.get('allocated_to_build_orders'),
+                    'allocated_to_sales_orders': item.get('allocated_to_sales_orders'),
+                    'building': item.get('building'),
+                    'ordering': item.get('ordering'),
+                    'variant_of': item.get('variant_of'),
+                    'is_template': item.get('is_template', False),
                 }
                 
-                # Add parameters if they exist
+                # Add parameters if they exist for this part
                 part_id = item.get('pk')
-                if part_id:
-                    if part_id in parameters:
-                        item_data['parameters'] = parameters[part_id]
-                    if part_id in metadata:
-                        item_data['image'] = metadata[part_id].get('image')
-                        item_data['thumbnail'] = metadata[part_id].get('thumbnail')
+                if part_id and str(part_id) in parameters:
+                    item_data['parameters'] = parameters[str(part_id)]
                 
                 items.append(item_data)
-        
+
         return {
             'items': items,
             'category_name': self._category_name,
@@ -151,12 +178,16 @@ async def async_setup_entry(
     """Set up Inventree sensor based on a config entry."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
     
+    _LOGGER.debug("Setting up Inventree sensors")
     entities = []
     
     if coordinator.data and "categories" in coordinator.data:
+        _LOGGER.debug("Found %d categories", len(coordinator.data["categories"]))
         for category in coordinator.data["categories"]:
             if isinstance(category, dict):
                 try:
+                    _LOGGER.debug("Creating sensor for category %s (id: %s)", 
+                                category.get('name'), category.get('pk'))
                     sensor = InventreeCategoryStockSensor(
                         coordinator,
                         category['pk'],
@@ -170,6 +201,9 @@ async def async_setup_entry(
                         e
                     )
     
+    # Add low stock sensor
+    _LOGGER.debug("Adding low stock sensor")
     entities.append(InventreeLowStockSensor(coordinator))
     
-    async_add_entities(entities, True)
+    _LOGGER.debug("Adding %d entities", len(entities))
+    async_add_entities(entities, True)  # Note the True parameter here
