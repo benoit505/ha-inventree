@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from datetime import datetime
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -12,9 +13,10 @@ from homeassistant.helpers.typing import ConfigType
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 
-from .const import DOMAIN, CONF_API_URL, CONF_API_KEY
-from .coordinator import InventreeDataUpdateCoordinator
+from .const import DOMAIN, CONF_API_URL, CONF_API_KEY, CONF_WEBSOCKET_URL, CONF_ENABLE_WEBSOCKET, DEFAULT_WEBSOCKET_PORT
+from .coordinator_v2 import SmartInventreeCoordinator
 from .api import InventreeAPIClient
+from urllib.parse import urlparse
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SENSOR]
@@ -39,9 +41,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         await api_client.async_init()
         
-        # Create and store coordinator
-        coordinator = InventreeDataUpdateCoordinator(hass, api_client)
-        await coordinator.async_config_entry_first_refresh()
+        # Determine WebSocket URL
+        websocket_url = entry.data.get(CONF_WEBSOCKET_URL, "")
+        enable_websocket = entry.data.get(CONF_ENABLE_WEBSOCKET, True)
+        
+        # Auto-generate WebSocket URL if not provided
+        if not websocket_url and enable_websocket:
+            parsed = urlparse(entry.data[CONF_API_URL])
+            # Use ws:// for http and wss:// for https
+            ws_scheme = "ws" if parsed.scheme == "http" else "wss"
+            websocket_url = f"{ws_scheme}://{parsed.hostname}:{DEFAULT_WEBSOCKET_PORT}"
+            _LOGGER.info("Auto-generated WebSocket URL: %s", websocket_url)
+        
+        # Create and store smart coordinator
+        coordinator = SmartInventreeCoordinator(
+            hass,
+            api_client,
+            websocket_url=websocket_url if websocket_url else None,
+            enable_websocket=enable_websocket and bool(websocket_url)
+        )
+        
+        # Start coordinator (includes WebSocket)
+        await coordinator.async_start()
         
         hass.data.setdefault(DOMAIN, {})
         hass.data[DOMAIN][entry.entry_id] = coordinator
@@ -124,23 +145,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             operation = call.data.get('operation')
             
             try:
-                # Find base template part
-                base_results = await api_client._api_request(f"part/?name={name}")
-                base_part = next(
-                    (p for p in base_results if p.get('name') == name and p.get('is_template')),
-                    None
-                )
+                # Find part by name (could be template or regular part)
+                search_results = await api_client._api_request(f"part/?name={name}")
                 
-                if not base_part:
-                    raise ValueError(f"Template part '{name}' not found")
+                # Find exact match by name
+                part = next((p for p in search_results if p.get('name', '').lower() == name.lower()), None)
+                
+                if not part:
+                    raise ValueError(f"Part '{name}' not found")
                     
-                base_id = base_part['pk']
-                _LOGGER.debug("Found template part: %s (ID: %s)", name, base_id)
+                part_id = part['pk']
+                is_template = part.get('is_template', False)
                 
-                # Get variants
-                variants = await api_client._api_request(f"part/?variant_of={base_id}")
+                _LOGGER.debug("Found part: %s (ID: %s, is_template: %s)", name, part_id, is_template)
                 
-                if operation == "transfer_stock":
+                if operation == "transfer_stock" and is_template:
+                    # Get variants - only works for template parts
+                    variants = await api_client._api_request(f"part/?variant_of={part_id}")
+                    
                     source_name = call.data.get('source_variant')
                     target_name = call.data.get('target_variant')
                     quantity = float(call.data.get('quantity', 0))
@@ -155,7 +177,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     # Handle special case for Raw->Prepared conversion
                     if "Raw" in source_name and "Cooked" in target_name:
                         # Get cooked ratio parameter
-                        params = await api_client._api_request(f"part/parameter/?part={base_id}")
+                        params = await api_client._api_request(f"part/parameter/?part={part_id}")
                         cooked_ratio = next(
                             (float(p['data']) for p in params if p['template_detail']['name'] == 'Cooked_Ratio'),
                             1.0
@@ -177,11 +199,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     parameter_name = call.data.get('parameter_name')
                     parameter_value = call.data.get('parameter_value')
                     
-                    # Update parameter on base template
-                    await api_client.update_parameter(base_id, parameter_name, parameter_value)
+                    # Update parameter on the part (template or regular)
+                    await api_client.update_parameter(part_id, parameter_name, parameter_value)
                     
                     _LOGGER.debug(
-                        "Updated parameter %s=%s on template %s",
+                        "Updated parameter %s=%s on part %s",
                         parameter_name, parameter_value, name
                     )
                     
@@ -204,16 +226,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             part_id = call.data.get('part_id')
             download_thumbnails = call.data.get('download_thumbnails', True)
             force_update = call.data.get('force_update', False)
+            parameter_name = call.data.get('parameter_name')
+            force_thumbnail_update = call.data.get('force_thumbnail_update', False)
             
-            _LOGGER.debug("Updating metadata: category=%s, part=%s, thumbnails=%s, force=%s",
-                         category_id, part_id, download_thumbnails, force_update)
+            _LOGGER.debug("Updating metadata: category=%s, part=%s, thumbnails=%s, force=%s, parameter=%s, force_thumbnails=%s",
+                         category_id, part_id, download_thumbnails, force_update, parameter_name, force_thumbnail_update)
             
             try:
                 if part_id:
                     # Update single part
-                    data = await api_client.get_part_details(
+                    data = await api_client.update_metadata(
                         part_id=int(part_id),
-                        download_thumbnails=download_thumbnails
+                        download_thumbnails=download_thumbnails and (force_thumbnail_update or force_update),
+                        parameter_name=parameter_name
                     )
                     _LOGGER.debug("Updated metadata for part %s", part_id)
                 elif category_id:
@@ -221,9 +246,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     parts = await api_client.get_category_parts(category_id)
                     for part in parts:
                         if download_thumbnails or force_update:
-                            data = await api_client.get_part_details(
+                            data = await api_client.update_metadata(
                                 part_id=part['id'],
-                                download_thumbnails=download_thumbnails
+                                download_thumbnails=download_thumbnails and (force_thumbnail_update or force_update),
+                                parameter_name=parameter_name
                             )
                     _LOGGER.debug("Updated metadata for category %s", category_id)
                 else:
@@ -231,9 +257,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     parts = await api_client.get_items()
                     for part in parts:
                         if download_thumbnails or force_update:
-                            data = await api_client.get_part_details(
+                            data = await api_client.update_metadata(
                                 part_id=part['pk'],
-                                download_thumbnails=download_thumbnails
+                                download_thumbnails=download_thumbnails and (force_thumbnail_update or force_update),
+                                parameter_name=parameter_name
                             )
                     _LOGGER.debug("Updated metadata for all parts")
 
@@ -264,6 +291,39 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 _LOGGER.error("Failed to print label: %s", err)
                 raise
         
+        async def update_parameter(call) -> None:
+            """Handle updating a parameter."""
+            part_id = call.data.get('part_id')
+            parameter_name = call.data.get('parameter_name')
+            value = call.data.get('value')
+            
+            _LOGGER.debug("Updating parameter %s=%s for part %s",
+                         parameter_name, value, part_id)
+            
+            try:
+                await api_client.update_parameter(part_id, parameter_name, value)
+                await coordinator.async_request_refresh()
+                _LOGGER.debug("Parameter updated successfully")
+            except Exception as err:
+                _LOGGER.error("Failed to update parameter: %s", err)
+                raise
+        
+        async def get_coordinator_stats(call) -> None:
+            """Get coordinator statistics."""
+            stats = coordinator.get_stats()
+            _LOGGER.info("=== InvenTree Coordinator Statistics ===")
+            _LOGGER.info("Full updates: %d", stats['full_updates'])
+            _LOGGER.info("Partial updates: %d", stats['partial_updates'])
+            _LOGGER.info("WebSocket events: %d", stats['websocket_events'])
+            _LOGGER.info("Cached parts: %d", stats['cached_parts'])
+            _LOGGER.info("Cached categories: %d", stats['cached_categories'])
+            _LOGGER.info("WebSocket enabled: %s", stats['websocket_enabled'])
+            if stats['websocket_enabled']:
+                _LOGGER.info("WebSocket connected: %s", stats.get('connected'))
+                _LOGGER.info("Activity state: %s", stats.get('activity_state'))
+                _LOGGER.info("Poll interval: %ss", stats.get('poll_interval_seconds'))
+            _LOGGER.info("======================================")
+        
         # Register services
         hass.services.async_register(DOMAIN, 'add_item', add_item)
         hass.services.async_register(DOMAIN, 'edit_item', edit_item)
@@ -271,7 +331,119 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.services.async_register(DOMAIN, 'adjust_stock', adjust_stock)
         hass.services.async_register(DOMAIN, 'variant_operations', variant_operations)
         hass.services.async_register(DOMAIN, 'update_metadata', update_metadata)
+        hass.services.async_register(DOMAIN, 'update_parameter', update_parameter)
         hass.services.async_register(DOMAIN, 'print_label', print_label)
+        hass.services.async_register(DOMAIN, 'get_stats', get_coordinator_stats)
+
+        # Register service
+        async def handle_add_part(call: ServiceCall) -> None:
+            """Handle the add_part service call."""
+            await coordinator.add_part(call.data)
+
+        async def async_process_barcode(hass: HomeAssistant, coordinator: InventreeDataUpdateCoordinator, barcode: str, **kwargs) -> dict:
+            """Process a barcode scan."""
+            try:
+                # Process barcode using API
+                result = await coordinator.api_client.process_barcode(barcode)
+                
+                if not result.get("found", False):
+                    _LOGGER.info(f"Barcode not found: {result.get('error')}")
+                    
+                    # If auto_create is True, create a new part
+                    if kwargs.get("auto_create", True):
+                        _LOGGER.info("Creating new part for unrecognized barcode")
+                        
+                        # Set default values if not provided
+                        name = kwargs.get("name")
+                        if not name:
+                            name = f"Scanned Item {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                        
+                        description = kwargs.get("description")
+                        if not description:
+                            description = f"Automatically created from barcode scan on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                        
+                        new_part = await coordinator.api_client.create_part({
+                            "name": name,
+                            "description": description,
+                            "category": kwargs.get("uncategorized_category_id", 125),
+                            "units": kwargs.get("units", "pcs"),
+                            "active": True,
+                            "component": True,
+                            "assembly": False,
+                            "purchaseable": True,
+                            "salable": False,
+                            "trackable": True,
+                            "virtual": False
+                        })
+                        
+                        if new_part:
+                            _LOGGER.info(f"Created new part: {new_part.get('name')}")
+                            # Link the barcode to the new part
+                            await coordinator.api_client.link_barcode(barcode, new_part["pk"])
+                            
+                            return {
+                                "found": True,
+                                "part": new_part,
+                                "dashboard_url": kwargs.get("redirect_to_dashboard", "/dashboard-uncategorized"),
+                                "newly_created": True
+                            }
+                    
+                    return {
+                        "found": False,
+                        "error": result.get("error"),
+                        "barcode_hash": result.get("barcode_hash"),
+                        "barcode_data": result.get("barcode_data")
+                    }
+                
+                # Part was found
+                new_part = result.get("part")
+                if new_part:
+                    return {
+                        "found": True,
+                        "part": new_part,
+                        "dashboard_url": result.get("dashboard_url")
+                    }
+                
+                return {
+                    "found": False,
+                    "error": "No part information available"
+                }
+                    
+            except Exception as e:
+                _LOGGER.error(f"Error processing barcode: {e}")
+                raise
+
+        async def process_barcode(call: ServiceCall) -> None:
+            """Handle the service call."""
+            barcode = call.data.get("barcode")
+            # Pass through all the optional parameters
+            result = await async_process_barcode(
+                hass, 
+                coordinator, 
+                barcode,
+                name=call.data.get("name"),
+                description=call.data.get("description"),
+                units=call.data.get("units"),
+                uncategorized_category_id=call.data.get("uncategorized_category_id"),
+                auto_create=call.data.get("auto_create"),
+                redirect_to_dashboard=call.data.get("redirect_to_dashboard")
+            )
+
+        hass.services.async_register(
+            DOMAIN,
+            "process_barcode",
+            process_barcode,
+            schema=vol.Schema({
+                vol.Required("barcode"): str,
+                vol.Optional("name"): str,
+                vol.Optional("description"): str,
+                vol.Optional("units", default="pcs"): str,
+                vol.Optional("uncategorized_category_id", default=125): int,
+                vol.Optional("auto_create", default=True): bool,
+                vol.Optional("redirect_to_dashboard", default="/dashboard-uncategorized"): str,
+            })
+        )
+
         _LOGGER.debug("Services registered successfully")
         
         return True

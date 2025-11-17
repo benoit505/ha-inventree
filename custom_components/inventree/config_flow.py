@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import DOMAIN, CONF_API_URL, CONF_API_KEY
+from .const import DOMAIN, CONF_API_URL, CONF_API_KEY, CONF_WEBSOCKET_URL, CONF_ENABLE_WEBSOCKET
 from .api import InventreeAPIClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,6 +39,8 @@ class InventreeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({
                 vol.Required(CONF_API_URL): str,
                 vol.Required(CONF_API_KEY): str,
+                vol.Optional(CONF_WEBSOCKET_URL, default=""): str,
+                vol.Optional(CONF_ENABLE_WEBSOCKET, default=True): bool,
             }),
             errors=errors,
         )
