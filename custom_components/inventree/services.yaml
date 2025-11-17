@@ -4,8 +4,8 @@ variant_operations:
   description: Manage variants, parameters, and stock transfers between variants
   fields:
     name:
-      name: Template Name
-      description: Name of the template part (e.g., Rice)
+      name: Part Name
+      description: Name of the part (can be a template part or regular part)
       required: true
       example: "Rice"
       selector:
@@ -17,8 +17,8 @@ variant_operations:
       selector:
         select:
           options:
-            - "transfer_stock"  # Transfer stock between variants
-            - "update_parameter"  # Update parameter on template or variant
+            - "transfer_stock"  # Transfer stock between variants (requires template part)
+            - "update_parameter"  # Update parameter on any part
             - "manage_batch"  # Future: Manage batch codes
     source_variant:
       name: Source Variant
@@ -170,55 +170,224 @@ update_parameter:
   fields:
     part_id:
       name: Part ID
-      description: ID of the part to update
+      description: The ID of the part to update
       required: true
-      example: "56"
       selector:
-        text:
+        number:
+          min: 1
+          mode: box
     parameter_name:
       name: Parameter Name
-      description: Name of the parameter to update
+      description: The name of the parameter to update
       required: true
-      example: "Food_State"
       selector:
         text:
     value:
       name: Value
-      description: New value for the parameter
+      description: The new value for the parameter
       required: true
-      example: "Prepared"
       selector:
         text:
 
 update_metadata:
   name: Update Metadata
-  description: Update metadata and download thumbnails for InvenTree parts
+  description: Update metadata for parts
   fields:
     category_id:
       name: Category ID
-      description: Optional - Update only parts in this category
+      description: The ID of the category to update (optional)
       required: false
-      example: "11"
       selector:
-        text:
+        number:
+          min: 1
+          mode: box
     part_id:
       name: Part ID
-      description: Optional - Update only this specific part
+      description: The ID of the part to update (optional)
       required: false
-      example: "3"
       selector:
-        text:
+        number:
+          min: 1
+          mode: box
     download_thumbnails:
       name: Download Thumbnails
-      description: Whether to download and store thumbnails locally
+      description: Whether to download thumbnails
       required: false
       default: true
       selector:
         boolean:
     force_update:
       name: Force Update
-      description: Update all metadata even if already present
+      description: Force update even if not needed
       required: false
       default: false
       selector:
         boolean:
+    parameter_name:
+      name: Parameter Name
+      description: Only update a specific parameter (optional)
+      required: false
+      selector:
+        text:
+    force_thumbnail_update:
+      name: Force Thumbnail Update
+      description: Force thumbnail update regardless of cache (overrides normal thumbnail caching)
+      required: false
+      default: false
+      selector:
+        boolean:
+
+add_part:
+  name: Add Part
+  description: Create a new part with comprehensive details
+  fields:
+    name:
+      name: Name
+      description: Part name
+      required: true
+      example: "Test Complete Part"
+      selector:
+        text:
+    description:
+      name: Description
+      description: Detailed description of the part
+      example: "A test part with all fields populated"
+      selector:
+        text:
+          multiline: true
+    category:
+      name: Category ID
+      description: Category ID for the part
+      example: 2
+      selector:
+        number:
+          min: 1
+          mode: box
+    IPN:
+      name: Internal Part Number
+      description: Internal Part Number (IPN)
+      example: "TEST-001"
+      selector:
+        text:
+    keywords:
+      name: Keywords
+      description: Search keywords/tags (comma separated)
+      example: "test,complete,example"
+      selector:
+        text:
+    units:
+      name: Units
+      description: Units of measure
+      example: "pcs"
+      selector:
+        text:
+    minimum_stock:
+      name: Minimum Stock
+      description: Minimum stock level
+      default: 0
+      selector:
+        number:
+          min: 0
+          mode: box
+    component:
+      name: Is Component
+      description: Is this a component part?
+      default: true
+      selector:
+        boolean:
+    assembly:
+      name: Is Assembly
+      description: Is this an assembly?
+      default: false
+      selector:
+        boolean:
+    purchaseable:
+      name: Purchaseable
+      description: Can this part be purchased?
+      default: true
+      selector:
+        boolean:
+    salable:
+      name: Salable
+      description: Can this part be sold?
+      default: false
+      selector:
+        boolean:
+    is_template:
+      name: Is Template
+      description: Is this a template part?
+      default: false
+      selector:
+        boolean:
+    variant_of:
+      name: Variant Of
+      description: Template part ID if this is a variant
+      selector:
+        number:
+          min: 1
+          mode: box
+    active:
+      name: Active
+      description: Is this part active?
+      default: true
+      selector:
+        boolean:
+
+process_barcode:
+  name: Process Barcode
+  description: Process a scanned barcode and handle part creation/lookup
+  fields:
+    barcode:
+      name: Barcode
+      description: The scanned barcode
+      required: true
+      example: "123456789"
+      selector:
+        text:
+    name:
+      name: Part Name
+      description: Part name (if creating new)
+      required: false
+      example: "New Part"
+      selector:
+        text:
+    description:
+      name: Description
+      description: Part description
+      required: false
+      example: "Automatically created from barcode scan"
+      selector:
+        text:
+    units:
+      name: Units
+      description: Units of measure
+      required: false
+      default: "pcs"
+      example: "pcs"
+      selector:
+        text:
+    uncategorized_category_id:
+      name: Uncategorized Category ID
+      description: ID of the Uncategorized category
+      required: false
+      default: 125
+      example: 125
+      selector:
+        number:
+          min: 1
+          mode: box
+    auto_create:
+      name: Auto Create
+      description: Automatically create part if not found
+      required: false
+      default: true
+      selector:
+        boolean:
+    redirect_to_dashboard:
+      name: Redirect to Dashboard
+      description: Generate dashboard URL for found/created part
+      required: false
+      default: "/dashboard-uncategorized"
+      example: "/dashboard-uncategorized"
+      selector:
+        text:

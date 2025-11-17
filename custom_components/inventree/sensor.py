@@ -75,6 +75,8 @@ class InventreeCategoryStockSensor(InventreeBaseSensor):
             return {}
 
         items = []
+        parameters = self.coordinator.data.get("parameters", {})  # Get parameters dict from coordinator
+        
         for item in self.coordinator.data["items"]:
             if isinstance(item, dict) and item.get('category') == self._category_id:
                 item_data = {
@@ -88,6 +90,11 @@ class InventreeCategoryStockSensor(InventreeBaseSensor):
                     'assembly': item.get('assembly'),
                     'category': item.get('category'),
                     'category_name': item.get('category_name'),
+                    'category_pathstring': item.get('category_pathstring', ''),
+                    'dashboard_url': item.get('dashboard_url', ''),
+                    'inventree_url': item.get('inventree_url', ''),
+                    'barcode_hash': item.get('barcode_hash', ''),
+                    'barcode_data': item.get('barcode_data', ''),
                     'component': item.get('component'),
                     'description': item.get('description'),
                     'full_name': item.get('full_name'),
@@ -104,11 +111,16 @@ class InventreeCategoryStockSensor(InventreeBaseSensor):
                     'building': item.get('building'),
                     'ordering': item.get('ordering'),
                     'variant_of': item.get('variant_of'),
-                    'is_template': item.get('is_template', False)
+                    'is_template': item.get('is_template', False),
                 }
+                
+                # Add parameters if they exist for this part
+                part_id = item.get('pk')
+                if part_id and str(part_id) in parameters:
+                    item_data['parameters'] = parameters[str(part_id)]
+                
                 items.append(item_data)
-        
-        _LOGGER.debug("Returning %d items for category %s", len(items), self._category_id)
+
         return {
             'items': items,
             'category_name': self._category_name,
